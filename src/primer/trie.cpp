@@ -42,27 +42,48 @@ auto Trie::Put(std::string_view key, T value) const -> Trie {
   // You should walk through the trie and create new nodes if necessary. If the node corresponding to the key already
   // exists, you should create a new `TrieNodeWithValue`.
   auto new_root = std::make_unique<TrieNode>(TrieNode(std::map<char, std::shared_ptr<const TrieNode>>()));
-  // auto parent = &new_root; // 作为遍历的间接指针
-  // auto tmp = new std::unique_ptr<TrieNode>[key.length()];
   if (root_ != nullptr) {  // 需要保证new_root非空，若root_非空，则原先make_unique的指针会释放内存，没有副作用
     new_root = root_->Clone();
   }
+  auto value_ptr = std::make_shared<T>(std::move(value));
   if (key.empty()) { // 根结点可能存值
-    auto value_ptr = std::make_shared<T>(std::move(value));
     auto tmp = std::make_unique<TrieNodeWithValue<T>>(\
               TrieNodeWithValue(new_root->children_, std::move(value_ptr)));
     return Trie(std::move(tmp));
   }
-  int count = 0;
-  std::vector<std::unique_ptr<TrieNode>> vec;
+  std::unique_ptr<TrieNode> vec = nullptr;
+  std::stack<TrieNode> 
+  // std::unique_ptr<TrieNodeWithValue<T>> leaf = nullptr;
+
+  // 先处理掉棘手的第一个字符，因为new_root是个unique_ptr，而后续的children都是shared_ptr
+  auto it_key = key.begin();
+  if (key.length() == 1) { 
+    vec = std::make_unique<TrieNodeWithValue<T>>(TrieNodeWithValue(std::map<char, std::shared_ptr<const TrieNode>>(), std::move(value_ptr)));
+    new_root->children_.insert(std::make_pair(*it_key, std::move(vec)));
+    return Trie(std::shared_ptr<const TrieNode>(std::move(new_root)));
+  } 
+  vec = std::make_unique<TrieNode>(TrieNode(std::map<char, std::shared_ptr<const TrieNode>>()));
+  auto it_find = new_root->children_.find(*it_key);
+  if (it_find != new_root->children_.end()) {
+    new_root->children_.at(*it_key) = std::move(vec);
+  } else {
+    new_root->children_.insert(std::make_pair(*it_key, std::move(vec)));
+  }
+
+  std::shared_ptr<TrieNode> parent = new_root->children_.at(*it_key); // 第一个字符的结点
+  it_key ++;
+  // if (new_root->children_.size() != 1 && parent->children_.size() != 1) {
+  //   new_root = std::make_unique<TrieNode>(TrieNode(std::map<char, std::shared_ptr<const TrieNode>>()));
+  // }
+  vec = std::make_unique<TrieNodeWithValue<T>>(TrieNodeWithValue(std::map<char, std::shared_ptr<const TrieNode>>(), std::move(value_ptr)));
+  parent->children_.insert(std::make_pair(*it_key, std::move(vec)));
 
   // // 遍历原Tire树，直到路径结束或没有结点延续，对直接相关支路结点均Clone，并修改上级结点的map信息
-  auto it_key = key.begin();
   // // for (; it_key + 1 != key.end(); ++it_key) {  // 假定至少有一个字符，遍历到倒数第二个字符为止
-  // //   auto it_find = (*parent)->children_.find(*it_key);
-  // //   if (it_find != (*parent)->children_.end()) {
-  // //     tmp[count] = (*parent)->children_.at(*it_key)->Clone();
-  // //     (*parent)->children_.at(*it_key) = std::shared_ptr<TrieNode>(std::move(tmp[count]));
+  // //   auto it_find = parent->children_.find(*it_key);
+  // //   if (it_find != parent->children_.end()) {
+  // //     tmp[count] = parent->children_.at(*it_key)->Clone();
+  // //     parent->children_.at(*it_key) = std::shared_ptr<TrieNode>(std::move(tmp[count]));
   // //     parent = &tmp[count ++];
   // //   } else {
   // //     break;
@@ -70,27 +91,27 @@ auto Trie::Put(std::string_view key, T value) const -> Trie {
   // // }
 
   // 根据剩下的路径建立ONLY-TrieNode支路，至仅剩最后一个字符
-  while (it_key + 1 != key.end()) {
-    vec.push_back(std::make_unique<TrieNode>(TrieNode(std::map<char, std::shared_ptr<const TrieNode>>())));
-    count ++;
-    if (count == 1) {
-      new_root->children_.insert(std::make_pair(*it_key, std::shared_ptr<TrieNode>(std::move(vec[count-1]))));
-    } else {
-      vec[count-2]->children_.insert(std::make_pair(*it_key, std::shared_ptr<TrieNode>(std::move(vec[count-1]))));
-    }
-    it_key ++;
-  }
+  // while (it_key + 1 != key.end()) {
+  //   vec = std::make_unique<TrieNode>(TrieNode(std::map<char, std::shared_ptr<const TrieNode>>()));
+  //   auto it_find = parent->children_.find(*it_key);
+  //   if (it_find != parent->children_.end()) {
+  //     parent->children_.at(*it_key) = std::move(vec);
+  //   } else {
+  //     parent->children_.insert(std::make_pair(*it_key, std::move(vec)));
+  //   }
+  //   parent = parent->children_.at(*it_key);
+  //   it_key ++;
+  // }
 
   // 为最后一个字符插入结点，并put上value
-  auto value_ptr = std::make_shared<T>(std::move(value));
-  auto leaf = std::make_unique<TrieNodeWithValue<T>>(TrieNodeWithValue(std::map<char, std::shared_ptr<const TrieNode>>(), std::move(value_ptr)));
-  auto it_find = vec[count-1]->children_.find(*it_key);
-  if (it_find != vec[count-1]->children_.end()) {  // already exists
-    leaf->children_ = vec[count-1]->children_.at(*it_key)->children_;
-    vec[count-1]->children_.at(*it_key) = std::shared_ptr<TrieNodeWithValue<T>>(std::move(leaf));
-  } else {  // no child for the key-char
-    vec[count-1]->children_.insert(std::make_pair(*it_key, std::shared_ptr<TrieNodeWithValue<T>>(std::move(leaf))));
-  }
+  // auto leaf = std::make_unique<TrieNodeWithValue<T>>(TrieNodeWithValue(std::map<char, std::shared_ptr<const TrieNode>>(), std::move(value_ptr)));
+  // auto iit_find = parent->children_.find(*it_key);
+  // if (iit_find != parent->children_.end()) {  // already exists
+  //   leaf->children_ = parent->children_.at(*it_key)->children_;
+  //   parent->children_.at(*it_key) = std::move(leaf);
+  // }// } else {  // no child for the key-char
+  //   // parent->children_.insert(std::make_pair(*it_key, std::shared_ptr<TrieNodeWithValue<T>>(std::move(leaf))));
+  // // }
 
   return Trie(std::shared_ptr<const TrieNode>(std::move(new_root)));
 }
