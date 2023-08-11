@@ -1,7 +1,8 @@
 #include "primer/trie.h"
+#include <stack>
 #include <string_view>
-#include "common/exception.h"
 #include <typeinfo>
+#include "common/exception.h"
 
 namespace bustub {
 
@@ -46,72 +47,60 @@ auto Trie::Put(std::string_view key, T value) const -> Trie {
     new_root = root_->Clone();
   }
   auto value_ptr = std::make_shared<T>(std::move(value));
-  if (key.empty()) { // 根结点可能存值
-    auto tmp = std::make_unique<TrieNodeWithValue<T>>(\
-              TrieNodeWithValue(new_root->children_, std::move(value_ptr)));
+  if (key.empty()) {  // 根结点可能存值
+    auto tmp = std::make_unique<TrieNodeWithValue<T>>(TrieNodeWithValue(new_root->children_, std::move(value_ptr)));
     return Trie(std::move(tmp));
   }
-  std::unique_ptr<TrieNode> vec = nullptr;
-  std::stack<TrieNode> 
-  // std::unique_ptr<TrieNodeWithValue<T>> leaf = nullptr;
+  std::unique_ptr<TrieNode> slot = nullptr;
+  std::stack<std::pair<char, std::unique_ptr<TrieNode>>> stack_vec;
+  auto parent = &new_root;
 
-  // 先处理掉棘手的第一个字符，因为new_root是个unique_ptr，而后续的children都是shared_ptr
   auto it_key = key.begin();
-  if (key.length() == 1) { 
-    vec = std::make_unique<TrieNodeWithValue<T>>(TrieNodeWithValue(std::map<char, std::shared_ptr<const TrieNode>>(), std::move(value_ptr)));
-    new_root->children_.insert(std::make_pair(*it_key, std::move(vec)));
-    return Trie(std::shared_ptr<const TrieNode>(std::move(new_root)));
-  } 
-  vec = std::make_unique<TrieNode>(TrieNode(std::map<char, std::shared_ptr<const TrieNode>>()));
-  auto it_find = new_root->children_.find(*it_key);
-  if (it_find != new_root->children_.end()) {
-    new_root->children_.at(*it_key) = std::move(vec);
-  } else {
-    new_root->children_.insert(std::make_pair(*it_key, std::move(vec)));
+  // 遍历原Tire树，直到路径结束或没有结点延续，对直接相关支路结点均Clone，并修改上级结点的map信息
+  for (; it_key + 1 != key.end(); ++it_key) {  // 假定至少有一个字符，遍历到倒数第二个字符为止
+    auto it_find = (*parent)->children_.find(*it_key);
+    if (it_find != (*parent)->children_.end()) {
+      slot = (*parent)->children_.at(*it_key)->Clone();
+      stack_vec.push(std::make_pair(*it_key, std::move(slot)));
+      parent = &stack_vec.top().second;  // 所以裸指针很危险，如果还是parent=&slot，会出问题
+    } else {
+      break;
+    }
   }
 
-  std::shared_ptr<TrieNode> parent = new_root->children_.at(*it_key); // 第一个字符的结点
-  it_key ++;
-  // if (new_root->children_.size() != 1 && parent->children_.size() != 1) {
-  //   new_root = std::make_unique<TrieNode>(TrieNode(std::map<char, std::shared_ptr<const TrieNode>>()));
-  // }
-  vec = std::make_unique<TrieNodeWithValue<T>>(TrieNodeWithValue(std::map<char, std::shared_ptr<const TrieNode>>(), std::move(value_ptr)));
-  parent->children_.insert(std::make_pair(*it_key, std::move(vec)));
-
-  // // 遍历原Tire树，直到路径结束或没有结点延续，对直接相关支路结点均Clone，并修改上级结点的map信息
-  // // for (; it_key + 1 != key.end(); ++it_key) {  // 假定至少有一个字符，遍历到倒数第二个字符为止
-  // //   auto it_find = parent->children_.find(*it_key);
-  // //   if (it_find != parent->children_.end()) {
-  // //     tmp[count] = parent->children_.at(*it_key)->Clone();
-  // //     parent->children_.at(*it_key) = std::shared_ptr<TrieNode>(std::move(tmp[count]));
-  // //     parent = &tmp[count ++];
-  // //   } else {
-  // //     break;
-  // //   }
-  // // }
-
   // 根据剩下的路径建立ONLY-TrieNode支路，至仅剩最后一个字符
-  // while (it_key + 1 != key.end()) {
-  //   vec = std::make_unique<TrieNode>(TrieNode(std::map<char, std::shared_ptr<const TrieNode>>()));
-  //   auto it_find = parent->children_.find(*it_key);
-  //   if (it_find != parent->children_.end()) {
-  //     parent->children_.at(*it_key) = std::move(vec);
-  //   } else {
-  //     parent->children_.insert(std::make_pair(*it_key, std::move(vec)));
-  //   }
-  //   parent = parent->children_.at(*it_key);
-  //   it_key ++;
-  // }
+  while (it_key + 1 != key.end()) {
+    slot = std::make_unique<TrieNode>(TrieNode(std::map<char, std::shared_ptr<const TrieNode>>()));
+    stack_vec.push(std::make_pair(*it_key, std::move(slot)));
+    it_key++;
+  }
 
-  // 为最后一个字符插入结点，并put上value
-  // auto leaf = std::make_unique<TrieNodeWithValue<T>>(TrieNodeWithValue(std::map<char, std::shared_ptr<const TrieNode>>(), std::move(value_ptr)));
-  // auto iit_find = parent->children_.find(*it_key);
-  // if (iit_find != parent->children_.end()) {  // already exists
-  //   leaf->children_ = parent->children_.at(*it_key)->children_;
-  //   parent->children_.at(*it_key) = std::move(leaf);
-  // }// } else {  // no child for the key-char
-  //   // parent->children_.insert(std::make_pair(*it_key, std::shared_ptr<TrieNodeWithValue<T>>(std::move(leaf))));
-  // // }
+  // 回收，建新树
+  slot = std::make_unique<TrieNodeWithValue<T>>(\
+      TrieNodeWithValue(std::map<char, std::shared_ptr<const TrieNode>>(), std::move(value_ptr)));
+  char key_char = *it_key;
+  while (!stack_vec.empty()) {
+    auto it_find = stack_vec.top().second->children_.find(key_char);
+    if (it_find != stack_vec.top().second->children_.end()) {
+      if (it_key+1 == key.end()) { // 只有新加入的叶子不清楚自己的children_，其他的都Clone()过来了，唯一要加的就只有top()
+        slot->children_ = stack_vec.top().second->children_.at(key_char)->children_;
+        -- it_key; // 不再进入该if条件
+      }
+      stack_vec.top().second->children_.at(key_char) = std::move(slot);
+    } else {
+      it_key = key.begin(); // 防止首次没有进入上面的if，以后又进去了
+      stack_vec.top().second->children_.insert(std::make_pair(key_char, std::move(slot)));
+    }
+    key_char = stack_vec.top().first;
+    slot = std::move(stack_vec.top().second);
+    stack_vec.pop();
+  }
+  auto it_find = new_root->children_.find(key_char);
+  if (it_find != new_root->children_.end()) {
+    new_root->children_.at(key_char) = std::move(slot);
+  } else {
+    new_root->children_.insert(std::make_pair(key_char, std::move(slot)));
+  }
 
   return Trie(std::shared_ptr<const TrieNode>(std::move(new_root)));
 }
