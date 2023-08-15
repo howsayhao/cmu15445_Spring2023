@@ -3,6 +3,7 @@
  */
 
 #include "buffer/lru_k_replacer.h"
+// #include "lru_k_replacer.h"
 
 #include <algorithm>
 #include <cstdio>
@@ -16,7 +17,7 @@
 
 namespace bustub {
 
-TEST(LRUKReplacerTest, DISABLED_SampleTest) {
+TEST(LRUKReplacerTest, SampleTest) {
   LRUKReplacer lru_replacer(7, 2);
 
   // Scenario: add six elements to the replacer. We have [1,2,3,4,5]. Frame 6 is non-evictable.
@@ -55,6 +56,10 @@ TEST(LRUKReplacerTest, DISABLED_SampleTest) {
   lru_replacer.RecordAccess(4);
   lru_replacer.RecordAccess(5);
   lru_replacer.RecordAccess(4);
+  lru_replacer.Remove(4);
+  lru_replacer.RecordAccess(4);
+  lru_replacer.RecordAccess(4);
+  lru_replacer.RecordAccess(4);
   lru_replacer.SetEvictable(3, true);
   lru_replacer.SetEvictable(4, true);
   ASSERT_EQ(4, lru_replacer.Size());
@@ -84,6 +89,8 @@ TEST(LRUKReplacerTest, DISABLED_SampleTest) {
   lru_replacer.SetEvictable(1, true);
   ASSERT_EQ(2, lru_replacer.Size());
   ASSERT_EQ(true, lru_replacer.Evict(&value));
+  // std::cout << *(++(lru_replacer.NODES().at(4).History().rbegin())) << std::endl;
+  // std::cout << (lru_replacer.NODES().at(1).History().size()) << std::endl;
   ASSERT_EQ(value, 4);
 
   ASSERT_EQ(1, lru_replacer.Size());
