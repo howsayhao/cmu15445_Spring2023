@@ -32,7 +32,7 @@ class LRUKNode {
   auto History() const -> std::list<size_t> {return history_;}
   auto HistoryEntry() const -> size_t {return k_;}
   auto EvictableTrue() const -> bool {return is_evictable_;}
-
+/* 操作都不必加锁，因为说到底LRUKNode还是node_store_的成员，那里加锁就够了 */
   void Access(size_t curr_stamp) {
     history_.push_back(curr_stamp);
     k_ ++;
@@ -170,7 +170,7 @@ class LRUKReplacer {
   // TODO(student): implement me! You can replace these member variables as you like.
   // Remove maybe_unused if you start using them.
   std::unordered_map<frame_id_t, LRUKNode> node_store_;
-  size_t current_timestamp_{0}; // 这个需要我每次操作时都自增1
+  size_t current_timestamp_{0}; // 这个需要我每次操作时都自增1，来模拟时间戳的流动
   size_t curr_size_{0};  // current frame now for evictable frame
   size_t replacer_size_; // number of maximum frame
   size_t k_;
