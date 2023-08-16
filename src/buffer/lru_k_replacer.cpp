@@ -21,22 +21,22 @@ auto LRUKReplacer::Evict(frame_id_t *frame_id) -> bool {
   bool inf = false;
   bool evict_true = false;
   size_t max_time_stamp = 0;
-  frame_id_t frame_to_evict{0}; // 没有意义的初始化0，所以需要evict_true辅助
+  frame_id_t frame_to_evict{0};  // 没有意义的初始化0，所以需要evict_true辅助
   this->latch_.lock();
-  for (auto const &it : this->node_store_) { // it扫到后是pair类型
+  for (auto const &it : this->node_store_) {  // it扫到后是pair类型
     if (it.second.EvictableTrue()) {
       evict_true = true;
-      if (it.second.HistoryEntry() < this->k_) { // Classical LRU
-        if (not (inf && max_time_stamp>=(this->current_timestamp_ - it.second.History().back()))) {
+      if (it.second.HistoryEntry() < this->k_) {  // Classical LRU
+        if (not(inf && max_time_stamp >= (this->current_timestamp_ - it.second.History().back()))) {
           inf = true;
           max_time_stamp = this->current_timestamp_ - it.second.History().back();
           frame_to_evict = it.first;
         }
-      } else if (!inf) { // LRU-K
+      } else if (!inf) {  // LRU-K
         auto count = this->k_;
         size_t kth_stamp = 0;
         auto iterator = it.second.History();
-        for (auto kth = iterator.rbegin(); count>0; kth++,count--) {
+        for (auto kth = iterator.rbegin(); count > 0; kth++, count--) {
           if (count == 1) {
             kth_stamp = *kth;
           }
@@ -54,14 +54,14 @@ auto LRUKReplacer::Evict(frame_id_t *frame_id) -> bool {
   }
   *frame_id = frame_to_evict;
   this->node_store_.erase(frame_to_evict);
-  this->curr_size_ --;
+  this->curr_size_--;
   this->latch_.unlock();
   return true;
 }
 
 void LRUKReplacer::RecordAccess(frame_id_t frame_id, [[maybe_unused]] AccessType access_type) {
   latch_.lock();
-  if (static_cast<size_t>(frame_id) > this->replacer_size_ || frame_id <= 0) {
+  if (static_cast<size_t>(frame_id) >= this->replacer_size_ || frame_id < 0) {
     latch_.unlock();
     BUSTUB_ASSERT("id {} :out of replacer_size_ range", frame_id);
   }
@@ -69,14 +69,13 @@ void LRUKReplacer::RecordAccess(frame_id_t frame_id, [[maybe_unused]] AccessType
     this->node_store_.insert(std::make_pair(frame_id, LRUKNode()));
   }
   this->node_store_.at(frame_id).Access(this->current_timestamp_);
-  this->current_timestamp_ ++;
+  this->current_timestamp_++;
   latch_.unlock();
-  return ;
 }
 
 void LRUKReplacer::SetEvictable(frame_id_t frame_id, bool set_evictable) {
   latch_.lock();
-  if (static_cast<size_t>(frame_id) > this->replacer_size_ || frame_id <= 0) {
+  if (static_cast<size_t>(frame_id) >= this->replacer_size_ || frame_id < 0) {
     latch_.unlock();
     BUSTUB_ASSERT("id {} :out of replacer_size_ range", frame_id);
   }
@@ -84,27 +83,26 @@ void LRUKReplacer::SetEvictable(frame_id_t frame_id, bool set_evictable) {
     latch_.unlock();
     BUSTUB_ASSERT("id {} :no such frame yet", frame_id);
   }
-  auto tmp = & this->node_store_.at(frame_id);
+  auto tmp = &this->node_store_.at(frame_id);
   if (set_evictable && not tmp->EvictableTrue()) {
     tmp->VerseEvictable();
-    this->curr_size_ ++;
+    this->curr_size_++;
   } else if (not set_evictable && tmp->EvictableTrue()) {
     tmp->VerseEvictable();
-    this->curr_size_ --;
+    this->curr_size_--;
   }
   latch_.unlock();
-  return ;
 }
 
 void LRUKReplacer::Remove(frame_id_t frame_id) {
   latch_.lock();
-  if (static_cast<size_t>(frame_id) > this->replacer_size_ || frame_id <= 0) {
+  if (static_cast<size_t>(frame_id) >= this->replacer_size_ || frame_id < 0) {
     latch_.unlock();
     BUSTUB_ASSERT("id {} :out of replacer_size_ range", frame_id);
   }
   if (this->node_store_.find(frame_id) == this->node_store_.end()) {
     latch_.unlock();
-    return ;
+    return;
   }
   if (not this->node_store_.at(frame_id).EvictableTrue()) {
     latch_.unlock();
@@ -112,14 +110,13 @@ void LRUKReplacer::Remove(frame_id_t frame_id) {
   }
   this->node_store_.erase(frame_id);
   latch_.unlock();
-  return ;
 }
 
-auto LRUKReplacer::Size() -> size_t { 
+auto LRUKReplacer::Size() -> size_t {
   latch_.lock();
   auto current_size = this->curr_size_;
   latch_.unlock();
-  return current_size; 
+  return current_size;
 }
 
 }  // namespace bustub
