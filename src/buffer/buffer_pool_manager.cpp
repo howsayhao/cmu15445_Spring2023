@@ -41,6 +41,7 @@ BufferPoolManager::~BufferPoolManager() { delete[] pages_; }
 auto BufferPoolManager::NewPage(page_id_t *page_id) -> Page * {
   frame_id_t frame_to_set;
   latch_.lock();
+  // 分配好给新page的页框frame
   if (free_list_.empty()) {  // 没有空的frame了，需要找Replacer腾出空间
     if (replacer_->Evict(&frame_to_set)) {  // 若成功则说明是处于UnPin的状态，即evictable // 只有各个线程对该page/frame
                                             // unpin才允许evict
@@ -48,21 +49,21 @@ auto BufferPoolManager::NewPage(page_id_t *page_id) -> Page * {
       if (pages_[frame_to_set].IsDirty()) {
         disk_manager_->WritePage(pages_[frame_to_set].GetPageId(), pages_[frame_to_set].GetData());
       }
-      pages_[frame_to_set].SetClear();
     } else {
       latch_.unlock();
       return nullptr;
     }
   } else {
-    frame_to_set = this->free_list_.back();
-    free_list_.pop_back();
-    pages_[frame_to_set].SetClear();
+    frame_to_set = this->free_list_.front();
+    free_list_.pop_front();
   }
+  // 都要对新的page的meta信息做初始化
   *page_id = AllocatePage();
+  pages_[frame_to_set].is_dirty_ = false;
+  pages_[frame_to_set].page_id_ = *page_id;
+  pages_[frame_to_set].pin_count_ = 1;
   page_table_.insert(std::make_pair(*page_id, frame_to_set));
-
-  this->pages_[frame_to_set].SetId(*page_id);
-  this->pages_[frame_to_set].SetPin();
+  // 更新在LRUK-Replacer中的记录信息
   replacer_->RecordAccess(frame_to_set);
   replacer_->SetEvictable(frame_to_set, false);
 
@@ -84,8 +85,8 @@ auto BufferPoolManager::FetchPage(page_id_t page_id, [[maybe_unused]] AccessType
       replacer_->Evict(&frame_to_fetch);
       page_table_.erase(pages_[frame_to_fetch].GetPageId());
     } else {  // 要么是frame还有没用的
-      frame_to_fetch = free_list_.back();
-      free_list_.pop_back();
+      frame_to_fetch = free_list_.front();
+      free_list_.pop_front();
     }
     page_table_.insert(std::make_pair(page_id, frame_to_fetch));  // 得到frame后，马上装载进pgtbl里
   } else {  // 是在原已有的page上读入，那么没有必要清除这个frame的history
@@ -96,12 +97,11 @@ auto BufferPoolManager::FetchPage(page_id_t page_id, [[maybe_unused]] AccessType
   if (pages_[frame_to_fetch].IsDirty()) {
     disk_manager_->WritePage(pages_[frame_to_fetch].GetPageId(), pages_[frame_to_fetch].GetData());
   }
-  pages_[frame_to_fetch].SetClear();
-  pages_[frame_to_fetch].SetId(page_id);
-  pages_[frame_to_fetch].SetPin();
+  pages_[frame_to_fetch].page_id_ = page_id;
+  pages_[frame_to_fetch].pin_count_ = 1;
+  pages_[frame_to_fetch].is_dirty_ = false;
 
   disk_manager_->ReadPage(page_id, pages_[frame_to_fetch].GetData());
-  // snprintf(pages_[frame_to_fetch].GetData(), BUSTUB_PAGE_SIZE, "Hello");
   replacer_->RecordAccess(frame_to_fetch);
   replacer_->SetEvictable(frame_to_fetch, false);
 
@@ -121,12 +121,12 @@ auto BufferPoolManager::UnpinPage(page_id_t page_id, bool is_dirty, [[maybe_unus
     latch_.unlock();
     return false;
   }
-  pages_[frame_to_unpin].UnPin();
+  pages_[frame_to_unpin].pin_count_--;
   if (pages_[frame_to_unpin].GetPinCount() <= 0) {
     replacer_->SetEvictable(frame_to_unpin, true);
   }
-  if (is_dirty) {
-    pages_[frame_to_unpin].SetDirtyFlag(true);
+  if (is_dirty) {  // 因为一个线程的false不代表所有线程的false
+    pages_[frame_to_unpin].is_dirty_ = true;
   }
 
   latch_.unlock();
@@ -142,15 +142,43 @@ auto BufferPoolManager::FlushPage(page_id_t page_id) -> bool {
 
   auto frame_to_flush = page_table_.at(page_id);
   disk_manager_->WritePage(page_id, pages_[frame_to_flush].GetData());
-  pages_[frame_to_flush].SetDirtyFlag(false);
+  pages_[frame_to_flush].is_dirty_ = false;
 
   latch_.unlock();
   return true;
 }
 
-void BufferPoolManager::FlushAllPages() {}
+void BufferPoolManager::FlushAllPages() {
+  for (auto it : page_table_) {
+    if (!FlushPage(it.first)) {
+      BUSTUB_ASSERT("wrong when flushing all pages, at page id: {}.", it.first);
+    }
+  }
+}
 
-auto BufferPoolManager::DeletePage(page_id_t page_id) -> bool { return false; }
+auto BufferPoolManager::DeletePage(page_id_t page_id) -> bool {
+  latch_.lock();
+  if (page_table_.find(page_id) == page_table_.end()) {
+    latch_.unlock();
+    return true;
+  }
+  auto frame_to_delete = page_table_.at(page_id);
+  if (pages_[frame_to_delete].GetPinCount() != 0) {
+    latch_.unlock();
+    return false;
+  }
+  page_table_.erase(page_id);
+  replacer_->Remove(frame_to_delete);
+  free_list_.push_back(frame_to_delete);
+  pages_[frame_to_delete].page_id_ = INVALID_PAGE_ID;
+  pages_[frame_to_delete].is_dirty_ = false;
+  pages_[frame_to_delete].pin_count_ = 0;
+
+  DeallocatePage(page_id);
+
+  latch_.unlock();
+  return false;
+}
 
 auto BufferPoolManager::AllocatePage() -> page_id_t { return next_page_id_++; }
 

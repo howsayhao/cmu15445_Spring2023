@@ -172,8 +172,9 @@ class BufferPoolManager {
    */
   auto DeletePage(page_id_t page_id) -> bool;
 
-  auto PageNodes() const -> Page * {return pages_;}
-  auto PgTbl() const -> std::unordered_map<page_id_t, frame_id_t> {return page_table_;}
+  /* 测试时使用 */
+  auto PageNodes() const -> Page * { return pages_; }
+  auto PgTbl() const -> std::unordered_map<page_id_t, frame_id_t> { return page_table_; }
 
  private:
   /** Number of pages in the buffer pool. */

@@ -70,16 +70,16 @@ class Page {
   inline void SetLSN(lsn_t lsn) { memcpy(GetData() + OFFSET_LSN, &lsn, sizeof(lsn_t)); }
 
   /** PROJ_2.TASK2 我自己定义起来用的 **/
-  void SetId(page_id_t page_id) {page_id_ = page_id;}
-  void SetClear() { 
-    ResetMemory();
-    page_id_ = INVALID_PAGE_ID;
-    pin_count_ = 0;
-    is_dirty_ = false;
-  }
-  void SetPin() {pin_count_ ++;}
-  void UnPin() {pin_count_ --;}
-  void SetDirtyFlag(bool dirty_true) {is_dirty_ = dirty_true;}
+  // void SetId(page_id_t page_id) { page_id_ = page_id; }
+  // void SetClear() {
+  //   ResetMemory();
+  //   page_id_ = INVALID_PAGE_ID;
+  //   pin_count_ = 0;
+  //   is_dirty_ = false;
+  // }
+  // void SetPin() { pin_count_++; }
+  // void UnPin() { pin_count_--; }
+  // void SetDirtyFlag(bool dirty_true) { is_dirty_ = dirty_true; }
 
  protected:
   static_assert(sizeof(page_id_t) == 4);

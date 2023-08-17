@@ -27,7 +27,7 @@ auto LRUKReplacer::Evict(frame_id_t *frame_id) -> bool {
     if (it.second.EvictableTrue()) {
       evict_true = true;
       if (it.second.HistoryEntry() < this->k_) {  // Classical LRU
-        if (not(inf && max_time_stamp >= (this->current_timestamp_ - it.second.History().back()))) {
+        if (!(inf && max_time_stamp >= (this->current_timestamp_ - it.second.History().back()))) {
           inf = true;
           max_time_stamp = this->current_timestamp_ - it.second.History().back();
           frame_to_evict = it.first;
@@ -48,7 +48,7 @@ auto LRUKReplacer::Evict(frame_id_t *frame_id) -> bool {
       }
     }
   }
-  if (not evict_true) {
+  if (!evict_true) {
     this->latch_.unlock();
     return false;
   }
@@ -84,10 +84,10 @@ void LRUKReplacer::SetEvictable(frame_id_t frame_id, bool set_evictable) {
     BUSTUB_ASSERT("id {} :no such frame yet", frame_id);
   }
   auto tmp = &this->node_store_.at(frame_id);
-  if (set_evictable && not tmp->EvictableTrue()) {
+  if (set_evictable && !tmp->EvictableTrue()) {
     tmp->VerseEvictable();
     this->curr_size_++;
-  } else if (not set_evictable && tmp->EvictableTrue()) {
+  } else if (!set_evictable && tmp->EvictableTrue()) {
     tmp->VerseEvictable();
     this->curr_size_--;
   }
@@ -104,11 +104,12 @@ void LRUKReplacer::Remove(frame_id_t frame_id) {
     latch_.unlock();
     return;
   }
-  if (not this->node_store_.at(frame_id).EvictableTrue()) {
+  if (!this->node_store_.at(frame_id).EvictableTrue()) {
     latch_.unlock();
     BUSTUB_ASSERT("id {} :not evictable when trying to remove it", frame_id);
   }
   this->node_store_.erase(frame_id);
+  this->curr_size_--;
   latch_.unlock();
 }
 

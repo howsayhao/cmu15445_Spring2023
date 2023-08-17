@@ -25,7 +25,7 @@ class BasicPageGuard {
    * example, it should not be possible to call .Drop() on both page
    * guards and have the pin count decrease by 2.
    */
-  BasicPageGuard(BasicPageGuard &&that) noexcept;
+  BasicPageGuard(BasicPageGuard &&that) noexcept;  // noexcept: 不抛出异常
 
   /** TODO(P1): Add implementation
    *
@@ -82,7 +82,7 @@ class BasicPageGuard {
   friend class ReadPageGuard;
   friend class WritePageGuard;
 
-  [[maybe_unused]] BufferPoolManager *bpm_{nullptr};
+  BufferPoolManager *bpm_{nullptr};
   Page *page_{nullptr};
   bool is_dirty_{false};
 };

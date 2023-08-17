@@ -27,19 +27,17 @@ enum class AccessType { Unknown = 0, Get, Scan };
 
 class LRUKNode {
  public:
-  explicit LRUKNode() = default;
+  LRUKNode() = default;
 
-  auto History() const -> std::list<size_t> {return history_;}
-  auto HistoryEntry() const -> size_t {return k_;}
-  auto EvictableTrue() const -> bool {return is_evictable_;}
-/* 操作都不必加锁，因为说到底LRUKNode还是node_store_的成员，那里加锁就够了 */
+  auto History() const -> std::list<size_t> { return history_; }
+  auto HistoryEntry() const -> size_t { return k_; }
+  auto EvictableTrue() const -> bool { return is_evictable_; }
+  /* 操作都不必加锁，因为说到底LRUKNode还是node_store_的成员，那里加锁就够了 */
   void Access(size_t curr_stamp) {
     history_.push_back(curr_stamp);
-    k_ ++;
+    k_++;
   }
-  void VerseEvictable() {
-    is_evictable_ = ! is_evictable_;
-  }
+  void VerseEvictable() { is_evictable_ = !is_evictable_; }
 
  private:
   /** History of last seen K timestamps of this page. Least recent timestamp stored in front. */
@@ -98,7 +96,7 @@ class LRUKReplacer {
    * @param[out] frame_id id of frame that is evicted.
    * @return true if a frame is evicted successfully, false if no frames can be evicted.
    */
-  auto Evict(frame_id_t *frame_id) -> bool; // 为什么还需要一个frame_id_t的参数呢 // 用来返回被踢出的frame_id的
+  auto Evict(frame_id_t *frame_id) -> bool;  // 为什么还需要一个frame_id_t的参数呢 // 用来返回被踢出的frame_id的
 
   /**
    * TODO(P1): Add implementation
@@ -170,9 +168,9 @@ class LRUKReplacer {
   // TODO(student): implement me! You can replace these member variables as you like.
   // Remove maybe_unused if you start using them.
   std::unordered_map<frame_id_t, LRUKNode> node_store_;
-  size_t current_timestamp_{0}; // 这个需要我每次操作时都自增1，来模拟时间戳的流动
-  size_t curr_size_{0};  // current frame now for evictable frame
-  size_t replacer_size_; // number of maximum frame
+  size_t current_timestamp_{0};  // 这个需要我每次操作时都自增1，来模拟时间戳的流动
+  size_t curr_size_{0};          // current frame now for evictable frame
+  size_t replacer_size_;         // number of maximum frame
   size_t k_;
   std::mutex latch_;
 };

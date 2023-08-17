@@ -5,7 +5,12 @@ namespace bustub {
 
 BasicPageGuard::BasicPageGuard(BasicPageGuard &&that) noexcept {}
 
-void BasicPageGuard::Drop() {}
+void BasicPageGuard::Drop() {
+  bpm_->Delete(page_->GetPageId());
+  is_dirty_ = false;
+  bpm_ = nullptr;
+  page_ = nullptr;
+}
 
 auto BasicPageGuard::operator=(BasicPageGuard &&that) noexcept -> BasicPageGuard & { return *this; }
 
