@@ -11,7 +11,7 @@ class BasicPageGuard {
   BasicPageGuard() = default;
 
   BasicPageGuard(BufferPoolManager *bpm, Page *page) : bpm_(bpm), page_(page) {
-    std::cout << "basic page constructor in raw way" << std::endl;
+    // std::cout << "basic page constructor in raw way" << std::endl;
   }
 
   BasicPageGuard(const BasicPageGuard &) = delete;
@@ -98,7 +98,7 @@ class ReadPageGuard {
  public:
   ReadPageGuard() = default;
   ReadPageGuard(BufferPoolManager *bpm, Page *page) : guard_(bpm, page) {
-    std::cout << "read page constructor in raw way" << std::endl;
+    // std::cout << "read page constructor in raw way" << std::endl;
   }
   // guard_.page_->RLatch();
   ReadPageGuard(const ReadPageGuard &) = delete;
@@ -162,7 +162,7 @@ class WritePageGuard {
  public:
   WritePageGuard() = default;
   WritePageGuard(BufferPoolManager *bpm, Page *page) : guard_(bpm, page) {
-    std::cout << "write page constructor in raw way" << std::endl;
+    // std::cout << "write page constructor in raw way" << std::endl;
   }
   // guard_.page_->WLatch();
   WritePageGuard(const WritePageGuard &) = delete;

@@ -26,23 +26,24 @@ auto LRUKReplacer::Evict(frame_id_t *frame_id) -> bool {
   for (auto const &it : this->node_store_) {  // it扫到后是pair类型
     if (it.second.EvictableTrue()) {
       evict_true = true;
+      auto diff_stamp = this->current_timestamp_ - it.second.History().front();
       if (it.second.HistoryEntry() < this->k_) {  // Classical LRU
-        if (!(inf && max_time_stamp > (this->current_timestamp_ - it.second.History().front()))) {
+        if (!(inf && max_time_stamp > diff_stamp)) {
           inf = true;
-          max_time_stamp = this->current_timestamp_ - it.second.History().front();
+          max_time_stamp = diff_stamp;
           frame_to_evict = it.first;
         }
       } else if (!inf) {  // LRU-K
-        auto count = this->k_;
-        size_t kth_stamp = 0;
-        auto iterator = it.second.History();
-        for (auto kth = iterator.rbegin(); count > 0; kth++, count--) {
-          if (count == 1) {
-            kth_stamp = *kth;
-          }
-        }
-        if (max_time_stamp < (this->current_timestamp_ - kth_stamp)) {
-          max_time_stamp = this->current_timestamp_ - kth_stamp;
+        // auto count = this->k_;
+        // size_t kth_stamp = it.second.History().front();
+        // auto iterator = it.second.History();
+        // for (auto kth = iterator.rbegin(); count > 0; kth++, count--) {
+        // if (count == 1) {
+        // kth_stamp = *kth;
+        // }
+        // }
+        if (max_time_stamp < diff_stamp) {
+          max_time_stamp = diff_stamp;
           frame_to_evict = it.first;
         }
       }
@@ -66,7 +67,7 @@ void LRUKReplacer::RecordAccess(frame_id_t frame_id, [[maybe_unused]] AccessType
     BUSTUB_ASSERT("id {} :out of replacer_size_ range", frame_id);
   }
   if (this->node_store_.find(frame_id) == this->node_store_.end()) {
-    this->node_store_.insert(std::make_pair(frame_id, LRUKNode()));
+    this->node_store_.insert(std::make_pair(frame_id, LRUKNode(k_)));
   }
   this->node_store_.at(frame_id).Access(this->current_timestamp_);
   this->current_timestamp_++;

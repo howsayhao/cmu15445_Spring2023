@@ -5,7 +5,7 @@ namespace bustub {
 
 // BasicPageGuard
 BasicPageGuard::BasicPageGuard(BasicPageGuard &&that) noexcept {
-  std::cout << "Constructor(Basic Page)" << std::endl;
+  // std::cout << "Constructor(Basic Page)" << std::endl;
   // 自赋值
   bpm_ = that.bpm_;
   page_ = that.page_;
@@ -17,10 +17,10 @@ BasicPageGuard::BasicPageGuard(BasicPageGuard &&that) noexcept {
 
 void BasicPageGuard::Drop() {
   if (page_ == nullptr) {  // 这代表这个PageGuard已经没用了，不应该再影响实际page内容
-    std::cout << "already unpin or wrong drop()" << std::endl;
+    // std::cout << "already unpin or wrong drop()" << std::endl;
     return;
   }
-  std::cout << "drop basic page: " << page_->GetPageId() << std::endl;
+  // std::cout << "drop basic page: " << page_->GetPageId() << std::endl;
   bpm_->UnpinPage(page_->GetPageId(), is_dirty_);  // 先把这个page evictable掉，至少表明自己不再约束这个page的去留了
   // if (!bpm_->DeletePage(page_->GetPageId())) {  // 然后尝试去删掉这个page
   // BUSTUB_ASSERT("invalid delete when droping pageguard at id: {}.", page_->GetPageId());
@@ -34,7 +34,7 @@ void BasicPageGuard::Drop() {
 
 auto BasicPageGuard::operator=(BasicPageGuard &&that) noexcept -> BasicPageGuard & {
   // if (page_ != nullptr) {
-  std::cout << "operator=(Basic Page)" << std::endl;
+  // std::cout << "operator=(Basic Page)" << std::endl;
   Drop();
   // }
   // 自赋值
@@ -48,7 +48,7 @@ auto BasicPageGuard::operator=(BasicPageGuard &&that) noexcept -> BasicPageGuard
 }
 
 BasicPageGuard::~BasicPageGuard() {
-  std::cout << "~ BasicPageGuard" << std::endl;
+  // std::cout << "~ BasicPageGuard" << std::endl;
   this->Drop();
 }  // NOLINT
 
@@ -66,7 +66,7 @@ ReadPageGuard::ReadPageGuard(ReadPageGuard &&that) noexcept {
 }
 
 auto ReadPageGuard::operator=(ReadPageGuard &&that) noexcept -> ReadPageGuard & {
-  std::cout << "operator=(Read Page)" << std::endl;
+  // std::cout << "operator=(Read Page)" << std::endl;
   // 对原page进行unpin和解锁
   this->Drop();
   // 自赋值
@@ -82,10 +82,10 @@ auto ReadPageGuard::operator=(ReadPageGuard &&that) noexcept -> ReadPageGuard & 
 }
 
 void ReadPageGuard::Drop() {
-  if (guard_.page_ == nullptr) {  // 测试用例中有直接Drop()的情况，那么此时的Drop()应该要包括BasicPageGuard的Drop()
-    std::cout << "read drop() already finished!!!!!" << std::endl;
+  if (guard_.page_ != nullptr &&
+      !already_unlock_) {  // 测试用例中有直接Drop()的情况，那么此时的Drop()应该要包括BasicPageGuard的Drop()
+    // std::cout << "read drop() already finished!!!!!" << std::endl;
     // 析构由外而内，进入这种情况就默认不用Drop()直接析构结束了，即已经Drop()过了
-  } else if (!already_unlock_) {
     std::cout << "drop read page: " << guard_.page_->GetPageId() << std::endl;
     already_unlock_ = true;
     guard_.page_->RUnlatch();
@@ -95,7 +95,7 @@ void ReadPageGuard::Drop() {
 }
 
 ReadPageGuard::~ReadPageGuard() {
-  std::cout << "~ ReadPageGuard" << std::endl;
+  // std::cout << "~ ReadPageGuard" << std::endl;
   // if (!already_unlock_) {
   this->Drop();
   // }
@@ -103,7 +103,7 @@ ReadPageGuard::~ReadPageGuard() {
 
 // WritePageGuard
 WritePageGuard::WritePageGuard(WritePageGuard &&that) noexcept {
-  std::cout << "Constructor(Write Page)" << std::endl;
+  // std::cout << "Constructor(Write Page)" << std::endl;
   // 自赋值
   guard_.bpm_ = that.guard_.bpm_;
   guard_.page_ = that.guard_.page_;
@@ -115,7 +115,7 @@ WritePageGuard::WritePageGuard(WritePageGuard &&that) noexcept {
 };
 
 auto WritePageGuard::operator=(WritePageGuard &&that) noexcept -> WritePageGuard & {
-  std::cout << "operator=(Write Page)" << std::endl;
+  // std::cout << "operator=(Write Page)" << std::endl;
   // 清除以前的page_guard：构造由内而外，析构由外而内
   this->Drop();
   // 自赋值
@@ -130,10 +130,10 @@ auto WritePageGuard::operator=(WritePageGuard &&that) noexcept -> WritePageGuard
 }
 
 void WritePageGuard::Drop() {
-  if (guard_.page_ == nullptr) {  // 测试用例中有直接Drop()的情况，那么此时的Drop()应该要包括BasicPageGuard的Drop()
-    std::cout << "write drop() already finished!!!!!" << std::endl;
-  } else if (!already_unlock_) {
-    std::cout << "drop write page: " << guard_.page_->GetPageId() << std::endl;
+  if (guard_.page_ != nullptr &&
+      !already_unlock_) {  // 测试用例中有直接Drop()的情况，那么此时的Drop()应该要包括BasicPageGuard的Drop()
+    // std::cout << "write drop() already finished!!!!!" << std::endl;
+    // std::cout << "drop write page: " << guard_.page_->GetPageId() << std::endl;
     already_unlock_ = true;
     guard_.page_->WUnlatch();
     guard_.Drop();
@@ -141,7 +141,7 @@ void WritePageGuard::Drop() {
 }
 
 WritePageGuard::~WritePageGuard() {
-  std::cout << "~ WritePageGuard" << std::endl;
+  // std::cout << "~ WritePageGuard" << std::endl;
   // if (!already_unlock_) {
   // guard_.Drop();
   this->Drop();

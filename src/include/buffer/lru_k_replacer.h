@@ -27,7 +27,7 @@ enum class AccessType { Unknown = 0, Get, Scan };
 
 class LRUKNode {
  public:
-  LRUKNode() = default;
+  explicit LRUKNode(size_t lruk) : lruk_(lruk) {}
 
   auto History() const -> std::list<size_t> { return history_; }
   auto HistoryEntry() const -> size_t { return k_; }
@@ -35,7 +35,11 @@ class LRUKNode {
   /* 操作都不必加锁，因为说到底LRUKNode还是node_store_的成员，那里加锁就够了 */
   void Access(size_t curr_stamp) {
     history_.push_back(curr_stamp);
-    k_++;
+    if (k_ == lruk_) {
+      history_.pop_front();
+    } else {
+      k_++;
+    }
   }
   void VerseEvictable() { is_evictable_ = !is_evictable_; }
 
@@ -47,6 +51,8 @@ class LRUKNode {
   size_t k_{0};
   [[maybe_unused]] frame_id_t fid_;
   bool is_evictable_{false};
+
+  size_t lruk_;
 };
 
 /**
