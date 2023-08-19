@@ -10,7 +10,9 @@ class BasicPageGuard {
  public:
   BasicPageGuard() = default;
 
-  BasicPageGuard(BufferPoolManager *bpm, Page *page) : bpm_(bpm), page_(page) {}
+  BasicPageGuard(BufferPoolManager *bpm, Page *page) : bpm_(bpm), page_(page) {
+    std::cout << "basic page constructor in raw way" << std::endl;
+  }
 
   BasicPageGuard(const BasicPageGuard &) = delete;
   auto operator=(const BasicPageGuard &) -> BasicPageGuard & = delete;
@@ -89,13 +91,15 @@ class BasicPageGuard {
   Page *page_{nullptr};
   bool is_dirty_{false};
   /* 自定义 */
-  bool already_unpin_{false};
+  // bool already_unpin_{false};
 };
 
 class ReadPageGuard {
  public:
   ReadPageGuard() = default;
-  ReadPageGuard(BufferPoolManager *bpm, Page *page) : guard_(bpm, page) {}
+  ReadPageGuard(BufferPoolManager *bpm, Page *page) : guard_(bpm, page) {
+    std::cout << "read page constructor in raw way" << std::endl;
+  }
   // guard_.page_->RLatch();
   ReadPageGuard(const ReadPageGuard &) = delete;
   auto operator=(const ReadPageGuard &) -> ReadPageGuard & = delete;
@@ -151,13 +155,15 @@ class ReadPageGuard {
  private:
   // You may choose to get rid of this and add your own private variables.
   BasicPageGuard guard_;
-  // bool already_unpin_{false};
+  bool already_unlock_{false};
 };
 
 class WritePageGuard {
  public:
   WritePageGuard() = default;
-  WritePageGuard(BufferPoolManager *bpm, Page *page) : guard_(bpm, page) {}
+  WritePageGuard(BufferPoolManager *bpm, Page *page) : guard_(bpm, page) {
+    std::cout << "write page constructor in raw way" << std::endl;
+  }
   // guard_.page_->WLatch();
   WritePageGuard(const WritePageGuard &) = delete;
   auto operator=(const WritePageGuard &) -> WritePageGuard & = delete;
@@ -220,7 +226,7 @@ class WritePageGuard {
  private:
   // You may choose to get rid of this and add your own private variables.
   BasicPageGuard guard_;
-  // bool already_unpin_{false};
+  bool already_unlock_{false};
 };
 
 }  // namespace bustub
