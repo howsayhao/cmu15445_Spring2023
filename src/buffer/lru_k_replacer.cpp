@@ -27,9 +27,9 @@ auto LRUKReplacer::Evict(frame_id_t *frame_id) -> bool {
     if (it.second.EvictableTrue()) {
       evict_true = true;
       if (it.second.HistoryEntry() < this->k_) {  // Classical LRU
-        if (!(inf && max_time_stamp >= (this->current_timestamp_ - it.second.History().back()))) {
+        if (!(inf && max_time_stamp > (this->current_timestamp_ - it.second.History().front()))) {
           inf = true;
-          max_time_stamp = this->current_timestamp_ - it.second.History().back();
+          max_time_stamp = this->current_timestamp_ - it.second.History().front();
           frame_to_evict = it.first;
         }
       } else if (!inf) {  // LRU-K

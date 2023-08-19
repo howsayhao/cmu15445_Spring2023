@@ -55,10 +55,6 @@ TEST(LRUKReplacerTest, SampleTest) {
   lru_replacer.RecordAccess(4);
   lru_replacer.RecordAccess(5);
   lru_replacer.RecordAccess(4);
-  // lru_replacer.Remove(4);
-  // lru_replacer.RecordAccess(4);
-  // lru_replacer.RecordAccess(4);
-  // lru_replacer.RecordAccess(4);
   lru_replacer.SetEvictable(3, true);
   lru_replacer.SetEvictable(4, true);
   ASSERT_EQ(4, lru_replacer.Size());
@@ -99,5 +95,4 @@ TEST(LRUKReplacerTest, SampleTest) {
   ASSERT_EQ(false, lru_replacer.Evict(&value));
   ASSERT_EQ(0, lru_replacer.Size());
 }
-
 }  // namespace bustub

@@ -78,6 +78,9 @@ class BasicPageGuard {
     return reinterpret_cast<T *>(GetDataMut());
   }
 
+  /* 自定义，方便测试，不用时应注释掉 */
+  auto GetPage() const -> Page * { return page_; }
+
  private:
   friend class ReadPageGuard;
   friend class WritePageGuard;
@@ -85,12 +88,15 @@ class BasicPageGuard {
   BufferPoolManager *bpm_{nullptr};
   Page *page_{nullptr};
   bool is_dirty_{false};
+  /* 自定义 */
+  bool already_unpin_{false};
 };
 
 class ReadPageGuard {
  public:
   ReadPageGuard() = default;
   ReadPageGuard(BufferPoolManager *bpm, Page *page) : guard_(bpm, page) {}
+  // guard_.page_->RLatch();
   ReadPageGuard(const ReadPageGuard &) = delete;
   auto operator=(const ReadPageGuard &) -> ReadPageGuard & = delete;
 
@@ -145,12 +151,14 @@ class ReadPageGuard {
  private:
   // You may choose to get rid of this and add your own private variables.
   BasicPageGuard guard_;
+  // bool already_unpin_{false};
 };
 
 class WritePageGuard {
  public:
   WritePageGuard() = default;
   WritePageGuard(BufferPoolManager *bpm, Page *page) : guard_(bpm, page) {}
+  // guard_.page_->WLatch();
   WritePageGuard(const WritePageGuard &) = delete;
   auto operator=(const WritePageGuard &) -> WritePageGuard & = delete;
 
@@ -212,6 +220,7 @@ class WritePageGuard {
  private:
   // You may choose to get rid of this and add your own private variables.
   BasicPageGuard guard_;
+  // bool already_unpin_{false};
 };
 
 }  // namespace bustub
