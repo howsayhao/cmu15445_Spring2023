@@ -17,16 +17,18 @@ BPLUSTREE_TYPE::BPlusTree(std::string name, page_id_t header_page_id, BufferPool
       leaf_max_size_(leaf_max_size),
       internal_max_size_(internal_max_size),
       header_page_id_(header_page_id) {
-  WritePageGuard guard = bpm_->FetchPageWrite(header_page_id_);
-  auto root_page = guard.AsMut<BPlusTreeHeaderPage>();
-  root_page->root_page_id_ = INVALID_PAGE_ID;
+  WritePageGuard guard = bpm_->FetchPageWrite(header_page_id_); // 目前bptree已经至少有一个page了
+  auto root_page = guard.AsMut<BPlusTreeHeaderPage>(); // 得到了该page的数据内容，实际上是一个bptree header page的数据结构，
+                                                       // 暂时还没有内容，需要初始化，其实就只有一个root_page_id
+                                                       // 为什么要额外构建一个HeaderPage
+  root_page->root_page_id_ = INVALID_PAGE_ID; // 我觉得就不应该有HeadPage，有一说一，它怎么存值呢
 }
 
 /*
  * Helper function to decide whether current b+tree is empty
  */
 INDEX_TEMPLATE_ARGUMENTS
-auto BPLUSTREE_TYPE::IsEmpty() const -> bool { return true; }
+auto BPLUSTREE_TYPE::IsEmpty() const -> bool { return root_page->root_page_id_ == INVALID_PAGE_ID; }
 /*****************************************************************************
  * SEARCH
  *****************************************************************************/
@@ -39,7 +41,7 @@ INDEX_TEMPLATE_ARGUMENTS
 auto BPLUSTREE_TYPE::GetValue(const KeyType &key, std::vector<ValueType> *result, Transaction *txn) -> bool {
   // Declaration of context instance.
   Context ctx;
-  (void)ctx;
+  ctx.root_page_id_ = GetRootPageId();
   return false;
 }
 
@@ -109,7 +111,7 @@ auto BPLUSTREE_TYPE::End() -> INDEXITERATOR_TYPE { return INDEXITERATOR_TYPE(); 
  * @return Page id of the root of this tree
  */
 INDEX_TEMPLATE_ARGUMENTS
-auto BPLUSTREE_TYPE::GetRootPageId() -> page_id_t { return 0; }
+auto BPLUSTREE_TYPE::GetRootPageId() -> page_id_t { return root_page->root_page_id_; }
 
 /*****************************************************************************
  * UTILITIES AND DEBUG

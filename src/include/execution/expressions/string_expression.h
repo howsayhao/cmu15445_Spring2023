@@ -49,7 +49,7 @@ class StringExpression : public AbstractExpression {
     std::string str = val;  // 需要复制，主要是预留空间，否则transform后也还是空字符串
     if (expr_type_ == StringExpressionType::Lower) {
       std::transform(val.begin(), val.end(), str.begin(), ::tolower);
-    } else {  // StringExpressionType::Upper
+    } else if (expr_type_ == StringExpressionType::Upper) {
       std::transform(val.begin(), val.end(), str.begin(), ::toupper);
     }
     return str;
