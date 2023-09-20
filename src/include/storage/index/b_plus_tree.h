@@ -48,10 +48,11 @@ class Context {
   page_id_t root_page_id_{INVALID_PAGE_ID};
 
   // Store the write guards of the pages that you're modifying here.
-  std::deque<WritePageGuard> write_set_; // 将PageGuard放进容器里，因为此时PageGuard的生命周期还没结束
-                                         // 因为PageGuard重定义了赋值语句，这使得全程只存在一个有效的PageGuard
-                                         // 所以当将PageGuard放进容器中后，原来的变量已经失效，之后只能来该容器中获取对应PageGuard
-                                         // 之前变量所谓的失效倒也不是没有了，只是内容被清空并被标记Null了
+  std::deque<WritePageGuard>
+      write_set_;  // 将PageGuard放进容器里，因为此时PageGuard的生命周期还没结束
+                   // 因为PageGuard重定义了赋值语句，这使得全程只存在一个有效的PageGuard
+                   // 所以当将PageGuard放进容器中后，原来的变量已经失效，之后只能来该容器中获取对应PageGuard
+                   // 之前变量所谓的失效倒也不是没有了，只是内容被清空并被标记Null了
 
   // You may want to use this when getting value, but not necessary.
   std::deque<ReadPageGuard> read_set_;

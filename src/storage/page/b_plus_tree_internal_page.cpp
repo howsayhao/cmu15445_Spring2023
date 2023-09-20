@@ -25,9 +25,9 @@ namespace bustub {
  */
 INDEX_TEMPLATE_ARGUMENTS
 void B_PLUS_TREE_INTERNAL_PAGE_TYPE::Init(int max_size) {
-  SetPageType(IndexPageType::INVALID_INDEX_PAGE);
+  SetPageType(IndexPageType::INTERNAL_PAGE);
   SetMaxSize(max_size);
-  SetSize(0);
+  SetSize(1);  // 默认是有一个空槽的，只不过第一个槽是valid，但依然占据了位置；
 }
 /*
  * Helper method to get/set the key associated with input "index"(a.k.a
@@ -36,7 +36,7 @@ void B_PLUS_TREE_INTERNAL_PAGE_TYPE::Init(int max_size) {
 INDEX_TEMPLATE_ARGUMENTS
 auto B_PLUS_TREE_INTERNAL_PAGE_TYPE::KeyAt(int index) const -> KeyType {
   // replace with your own code
-  if (index>=1 && index<=GetSize()) { // index should be valid and non-zero
+  if (index >= 1 && index <= GetSize()) {  // index should be valid and non-zero
     KeyType key = array_[index].first;
     return key;
   }
@@ -45,8 +45,15 @@ auto B_PLUS_TREE_INTERNAL_PAGE_TYPE::KeyAt(int index) const -> KeyType {
 
 INDEX_TEMPLATE_ARGUMENTS
 void B_PLUS_TREE_INTERNAL_PAGE_TYPE::SetKeyAt(int index, const KeyType &key) {
-  if (index>=1 && index<=GetSize()) {
+  if (index >= 1 && index < GetSize()) {
     array_[index].first = key;
+  }
+}
+
+INDEX_TEMPLATE_ARGUMENTS
+void B_PLUS_TREE_INTERNAL_PAGE_TYPE::SetValueAt(int index, const ValueType &value) {
+  if (index >= 0 && index < GetSize()) {
+    array_[index].second = value;
   }
 }
 
@@ -55,14 +62,14 @@ void B_PLUS_TREE_INTERNAL_PAGE_TYPE::SetKeyAt(int index, const KeyType &key) {
  * offset)
  */
 INDEX_TEMPLATE_ARGUMENTS
-auto B_PLUS_TREE_INTERNAL_PAGE_TYPE::ValueAt(int index) const -> ValueType { 
-  if (index>=0 && index<=GetSize()) {
+auto B_PLUS_TREE_INTERNAL_PAGE_TYPE::ValueAt(int index) const -> ValueType {
+  if (index >= 0 && index < GetSize()) {
     if (index == 0) {
       std::cout << "value at index zero" << std::endl;
     }
     return array_[index].second;
   }
-  return {}; 
+  return {};
 }
 
 // valuetype for internalNode should be page id_t
