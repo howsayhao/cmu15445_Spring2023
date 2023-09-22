@@ -45,16 +45,16 @@ auto B_PLUS_TREE_INTERNAL_PAGE_TYPE::KeyAt(int index) const -> KeyType {
 
 INDEX_TEMPLATE_ARGUMENTS
 void B_PLUS_TREE_INTERNAL_PAGE_TYPE::SetKeyAt(int index, const KeyType &key) {
-  if (index >= 1 && index < GetSize()) {
-    array_[index].first = key;
-  }
+  // if (index >= 1 && index < GetSize()) {
+  array_[index].first = key;
+  // }
 }
 
 INDEX_TEMPLATE_ARGUMENTS
 void B_PLUS_TREE_INTERNAL_PAGE_TYPE::SetValueAt(int index, const ValueType &value) {
-  if (index >= 0 && index < GetSize()) {
-    array_[index].second = value;
-  }
+  // if (index >= 0 && index < GetSize()) {
+  array_[index].second = value;
+  // }
 }
 
 /*
@@ -64,9 +64,9 @@ void B_PLUS_TREE_INTERNAL_PAGE_TYPE::SetValueAt(int index, const ValueType &valu
 INDEX_TEMPLATE_ARGUMENTS
 auto B_PLUS_TREE_INTERNAL_PAGE_TYPE::ValueAt(int index) const -> ValueType {
   if (index >= 0 && index < GetSize()) {
-    if (index == 0) {
-      std::cout << "value at index zero" << std::endl;
-    }
+    // if (index == 0) {
+    //   std::cout << "value at index zero" << std::endl;
+    // }
     return array_[index].second;
   }
   return {};

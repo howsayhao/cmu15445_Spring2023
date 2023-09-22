@@ -54,7 +54,7 @@ BasicPageGuard::~BasicPageGuard() {
 
 // ReadPageGuard
 ReadPageGuard::ReadPageGuard(ReadPageGuard &&that) noexcept {
-  std::cout << "Constructor(Read Page)" << std::endl;
+  // std::cout << "Constructor(Read Page)" << std::endl;
   // 自赋值
   guard_.bpm_ = that.guard_.bpm_;
   guard_.page_ = that.guard_.page_;
@@ -86,7 +86,7 @@ void ReadPageGuard::Drop() {
       !already_unlock_) {  // 测试用例中有直接Drop()的情况，那么此时的Drop()应该要包括BasicPageGuard的Drop()
     // std::cout << "read drop() already finished!!!!!" << std::endl;
     // 析构由外而内，进入这种情况就默认不用Drop()直接析构结束了，即已经Drop()过了
-    std::cout << "drop read page: " << guard_.page_->GetPageId() << std::endl;
+    // std::cout << "drop read page: " << guard_.page_->GetPageId() << std::endl;
     already_unlock_ = true;
     guard_.page_->RUnlatch();
     guard_.Drop();

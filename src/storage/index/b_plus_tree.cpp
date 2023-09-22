@@ -52,7 +52,7 @@ auto BPLUSTREE_TYPE::GetValue(const KeyType &key, std::vector<ValueType> *result
   auto curr_page = guard.As<InternalPage>();
   while (!curr_page->IsLeafPage()) {
     for (int i = 1; i < curr_page->GetSize(); i++) {  // 注意，这里的getsize是已经包括了空槽的了，所以<
-      if (comparator_(key, curr_page->KeyAt(i)) == -1) {
+      if (comparator_(key, curr_page->KeyAt(i)) < 0) {
         guard = bpm_->FetchPageRead(curr_page->ValueAt(i - 1));
         break;
       }
@@ -98,6 +98,7 @@ auto BPLUSTREE_TYPE::Insert(const KeyType &key, const ValueType &value, Transact
     guard = bpm_->FetchPageWrite(root_page_id);
     auto root_page = guard.AsMut<LeafPage>();
     root_page->Init();
+    root_page->SetMaxSize(leaf_max_size_);
     root_page->SetAt(0, key, value);
     root_page->IncreaseSize(1);
     return true;
@@ -110,7 +111,7 @@ auto BPLUSTREE_TYPE::Insert(const KeyType &key, const ValueType &value, Transact
   while (!curr_page->IsLeafPage()) {
     WritePageGuard guard;
     for (int i = 1; i < curr_page->GetSize(); i++) {  // 注意，这里的getsize是已经包括了空槽的了，所以<
-      if (comparator_(key, curr_page->KeyAt(i)) == -1) {
+      if (comparator_(key, curr_page->KeyAt(i)) < 0) {
         guard = bpm_->FetchPageWrite(curr_page->ValueAt(i - 1));
         break;
       }
@@ -124,6 +125,7 @@ auto BPLUSTREE_TYPE::Insert(const KeyType &key, const ValueType &value, Transact
     }
     ctx.write_set_.push_back(std::move(guard));
   }
+  // std::cout << "get collected" << std::endl;
   // 进行insert操作，首先处理两个小case
   auto orign_page_id = ctx.write_set_.back().PageId();
   auto leaf_page = ctx.write_set_.back().AsMut<LeafPage>();
@@ -133,39 +135,64 @@ auto BPLUSTREE_TYPE::Insert(const KeyType &key, const ValueType &value, Transact
       return false;
     }
   }
+  // std::cout << "leaf max:" << leaf_page->GetMaxSize() << std::endl;
+  MappingType tmp;
+  MappingType ins = {key, value};
+  int insert_slot = -1;
   if (leaf_page->GetSize() < leaf_page->GetMaxSize()) {  // 不会有split操作
-    leaf_page->SetAt(leaf_page->GetSize(), key, value);
+    // std::cout << "leaf size:" << leaf_page->GetSize() << std::endl;
+    for (int i = 0; i < leaf_page->GetSize(); i++) {
+      if (comparator_(key, leaf_page->KeyAt(i)) < 0 && insert_slot == -1) {
+        insert_slot = i;
+      }
+      if (insert_slot != -1) {
+        tmp = {leaf_page->KeyAt(i), leaf_page->ValueAt(i)};
+        leaf_page->SetAt(i, ins.first, ins.second);
+        ins = tmp;
+      }
+    }
+    leaf_page->SetAt(leaf_page->GetSize(), ins.first, ins.second);
     leaf_page->IncreaseSize(1);
     return true;
   }
+  // std::cout << "to be splited" << std::endl;
+  // std::cout << "path length:" << ctx.write_set_.size() << std::endl;
   // 处理一般性的insert
   // 每次分裂，传给上面的无非就是一个page的id(只有page_id，因为internal不存slot_num)，确定增添位置的key,以及将增加的key，三个东西
   KeyType orign_key;
   KeyType split_key;
   page_id_t split_page_id;
-  // 先将叶子结点处理掉
+  // 先将叶子结点处理掉，将叶子结点分裂开，提供给上方pid,key1,key2三个东西
   bpm_->NewPageGuarded(&split_page_id);
   auto split_guard = bpm_->FetchPageWrite(split_page_id);
   auto split_leaf_page = split_guard.AsMut<LeafPage>();
   split_leaf_page->Init();
+  split_leaf_page->SetMaxSize(leaf_max_size_);
   split_leaf_page->SetSize((leaf_page->GetMaxSize() + 1) - (leaf_page->GetMaxSize() + 1) / 2);
-  MappingType tmp;
-  MappingType ins = {key, value};
-  int insert_slot = -1;
   for (int i = 0; i < leaf_page->GetMaxSize(); i++) {
-    if (comparator_(key, leaf_page->KeyAt(i)) >= 0 && insert_slot == -1) {  // 找到槽位
-      insert_slot = i;
+    if (comparator_(key, leaf_page->KeyAt(i)) < 0 &&
+        insert_slot == -1) {  // 找到槽位0 // btw，这个方法确实不如前面的那个，代码麻烦了不少
+      insert_slot = 0;
     }
-    if (insert_slot != -1) {  // 按序插入并必要地移到split_page上
+    if (insert_slot != -1 || i >= (leaf_page->GetMaxSize() + 1) / 2) {  // 按序插入并必要地移到split_page上
       if (i < (leaf_page->GetMaxSize() + 1) / 2) {
         tmp = {leaf_page->KeyAt(i), leaf_page->ValueAt(i)};
         leaf_page->SetAt(i, ins.first, ins.second);
         ins = tmp;
       } else {
-        tmp = {leaf_page->KeyAt(i), leaf_page->ValueAt(i)};
-        split_leaf_page->SetAt(i - (leaf_page->GetMaxSize() + 1) / 2, ins.first, ins.second);
-        ins = tmp;
+        if (insert_slot != -1) {
+          tmp = {leaf_page->KeyAt(i), leaf_page->ValueAt(i)};
+          split_leaf_page->SetAt(i - (leaf_page->GetMaxSize() + 1) / 2, ins.first, ins.second);
+          ins = tmp;
+        } else {
+          split_leaf_page->SetAt(i - (leaf_page->GetMaxSize() + 1) / 2, leaf_page->KeyAt(i), leaf_page->ValueAt(i));
+        }
       }
+    }
+    if (comparator_(key, leaf_page->KeyAt(i)) >= 0 &&
+        (i + 1 == leaf_page->GetMaxSize() || comparator_(key, leaf_page->KeyAt(i + 1)) < 0) &&
+        insert_slot == -1) {  // 找到槽位x(x>0)
+      insert_slot = i + 1;
     }
   }
   leaf_page->SetSize((leaf_page->GetMaxSize() + 1) / 2);
@@ -175,10 +202,15 @@ auto BPLUSTREE_TYPE::Insert(const KeyType &key, const ValueType &value, Transact
   split_leaf_page->SetNextPageId(leaf_page->GetNextPageId());
   leaf_page->SetNextPageId(split_page_id);
 
-  // 不断迭代上推，直到只剩最后一个parent，它的行为和其他的不一样
+  // 不断迭代上推，直到只剩最后一个non-split parent，如果没有non-split parent那么全部推出
+  // 这一过程的行为和处理叶子的相似但不一样，所以不能合用代码
   WritePageGuard parent_guard;
   page_id_t new_split_page_id;
-  while (ctx.write_set_.size() > 1 || ctx.write_set_.back().PageId() == GetRootPageId()) {
+  bool to_split_root = !ctx.write_set_.empty() && ctx.write_set_.front().PageId() == GetRootPageId() &&
+                       ctx.write_set_.front().AsMut<InternalPage>()->GetSize() ==
+                           ctx.write_set_.front().AsMut<InternalPage>()->GetMaxSize();
+  while (ctx.write_set_.size() > 1 || (to_split_root && !ctx.write_set_.empty())) {
+    std::cout << "search for non-split node" << std::endl;
     parent_guard = std::move(ctx.write_set_.back());
     ctx.write_set_.pop_back();
     auto parent_page = parent_guard.AsMut<InternalPage>();
@@ -186,39 +218,49 @@ auto BPLUSTREE_TYPE::Insert(const KeyType &key, const ValueType &value, Transact
     auto split_guard = bpm_->FetchPageWrite(new_split_page_id);
     auto split_page = split_guard.AsMut<InternalPage>();
     split_page->Init();
-    split_page->SetSize((parent_page->GetMaxSize()) - (parent_page->GetMaxSize()) / 2);
-
+    split_page->SetMaxSize(internal_max_size_);
+    split_page->SetSize((parent_page->GetMaxSize()) - ((parent_page->GetMaxSize()) / 2 + 1) + 1);
     KeyType ktmp;
     page_id_t ptmp;
     KeyType kins = split_key;
     page_id_t pins = split_page_id;
     int insert_slot = -1;
     for (int i = 1; i < parent_page->GetMaxSize(); i++) {
-      if (comparator_(split_key, parent_page->KeyAt(i)) >= 0 && insert_slot == -1) {  // 找到槽位
+      if (comparator_(split_key, parent_page->KeyAt(i)) < 0 && insert_slot == -1) {  // 找到槽位
         insert_slot = i;
       }
-      if (insert_slot != -1) {  // 按序插入并必要地移到split_page上
-        if (i < (parent_page->GetMaxSize()) / 2) {
+      if (insert_slot != -1 || i >= ((parent_page->GetMaxSize()) / 2 + 1)) {  // 按序插入并必要地移到split_page上
+        if (i < ((parent_page->GetMaxSize()) / 2 + 1)) {
           ktmp = parent_page->KeyAt(i);
           ptmp = parent_page->ValueAt(i);
           parent_page->SetKeyAt(i, kins);
           parent_page->SetValueAt(i, pins);
           kins = ktmp;
           pins = ptmp;
-        } else if (i == (parent_page->GetMaxSize()) / 2) {
-          split_key = kins;
-          split_page->SetValueAt(0, pins);
-          kins = parent_page->KeyAt(i);
-          pins = parent_page->ValueAt(i);
+        } else if (i == ((parent_page->GetMaxSize()) / 2 + 1)) {
+          if (insert_slot != -1) {
+            split_key = kins;
+            split_page->SetValueAt(0, pins);
+            kins = parent_page->KeyAt(i);
+            pins = parent_page->ValueAt(i);
+          } else {
+            split_key = parent_page->KeyAt(i);
+            split_page->SetValueAt(0, parent_page->ValueAt(i));
+          }
         } else {
-          parent_page->SetKeyAt(i - (parent_page->GetMaxSize()) / 2, kins);
-          parent_page->SetValueAt(i - (parent_page->GetMaxSize()) / 2, pins);
-          kins = parent_page->KeyAt(i);
-          pins = parent_page->ValueAt(i);
+          if (insert_slot != -1) {
+            split_page->SetKeyAt(i - ((parent_page->GetMaxSize()) / 2 + 1), kins);
+            split_page->SetValueAt(i - ((parent_page->GetMaxSize()) / 2 + 1), pins);
+            kins = parent_page->KeyAt(i);
+            pins = parent_page->ValueAt(i);
+          } else {
+            split_page->SetKeyAt(i - ((parent_page->GetMaxSize()) / 2 + 1), parent_page->KeyAt(i));
+            split_page->SetValueAt(i - ((parent_page->GetMaxSize()) / 2 + 1), parent_page->ValueAt(i));
+          }
         }
       }
     }
-    parent_page->SetSize((parent_page->GetMaxSize()) / 2);
+    parent_page->SetSize((parent_page->GetMaxSize()) / 2 + 1);
     split_page->SetKeyAt(split_page->GetSize() - 1, kins);
     split_page->SetValueAt(split_page->GetSize() - 1, pins);
     orign_key = parent_page->KeyAt(1);
@@ -226,8 +268,9 @@ auto BPLUSTREE_TYPE::Insert(const KeyType &key, const ValueType &value, Transact
     orign_page_id = parent_guard.PageId();
   }
 
-  // 获得后判断此时根结点是否分裂
+  // 没有non-split parent，意味着需要重建root
   if (ctx.write_set_.empty()) {
+    std::cout << "new root for root split" << std::endl;
     WritePageGuard guard = bpm_->FetchPageWrite(header_page_id_);
     auto root_header_page = guard.AsMut<BPlusTreeHeaderPage>();
     page_id_t root_page_id;
@@ -236,13 +279,15 @@ auto BPLUSTREE_TYPE::Insert(const KeyType &key, const ValueType &value, Transact
     guard = bpm_->FetchPageWrite(root_page_id);
     auto root_page = guard.AsMut<InternalPage>();
     root_page->Init();
+    root_page->SetMaxSize(internal_max_size_);
+    root_page->IncreaseSize(1);
     root_page->SetKeyAt(1, split_key);
     root_page->SetValueAt(1, split_page_id);
     root_page->SetValueAt(0, orign_page_id);
-    root_page->IncreaseSize(1);
     return true;
   }
 
+  std::cout << "non-split insert" << std::endl;
   // 最后的non-split结点处理
   parent_guard = std::move(ctx.write_set_.back());
   ctx.write_set_.pop_back();
@@ -253,7 +298,7 @@ auto BPLUSTREE_TYPE::Insert(const KeyType &key, const ValueType &value, Transact
   page_id_t pins = split_page_id;
   insert_slot = -1;
   for (int i = 1; i < parent_page->GetMaxSize(); i++) {
-    if (comparator_(split_key, parent_page->KeyAt(i)) >= 0 && insert_slot == -1) {  // 找到槽位
+    if (comparator_(split_key, parent_page->KeyAt(i)) < 0 && insert_slot == -1) {  // 找到槽位
       insert_slot = i;
     }
     if (insert_slot != -1) {  // 按序插入并必要地移到split_page上
@@ -265,6 +310,9 @@ auto BPLUSTREE_TYPE::Insert(const KeyType &key, const ValueType &value, Transact
       pins = ptmp;
     }
   }
+  parent_page->SetKeyAt(parent_page->GetSize(), kins);
+  parent_page->SetValueAt(parent_page->GetSize(), pins);
+  parent_page->IncreaseSize(1);
   return true;
 }
 
@@ -294,7 +342,27 @@ void BPLUSTREE_TYPE::Remove(const KeyType &key, Transaction *txn) {
  * @return : index iterator
  */
 INDEX_TEMPLATE_ARGUMENTS
-auto BPLUSTREE_TYPE::Begin() -> INDEXITERATOR_TYPE { return INDEXITERATOR_TYPE(); }
+auto BPLUSTREE_TYPE::Begin() -> INDEXITERATOR_TYPE { 
+  // 找到最左边叶子结点的page_id
+  if (IsEmpty()) {
+    
+  }
+  ReadPageGuard guard = bpm_->FetchPageRead(GetRootPageId());
+  auto curr_page = guard.As<InternalPage>();
+  while (!curr_page->IsLeafPage()) {
+    guard = bpm_->FetchPageRead(curr_page->ValueAt(0));
+    curr_page = guard.As<InternalPage>();
+  }
+  auto leaf_page = guard.As<LeafPage>();
+  // 建立迭代器并返回
+  page_id_t curr_page = guard.PageId();
+  int curr_slot = 0;
+  KeyType curr_key = leaf_page->KeyAt(0);
+  ValueType curr_val = leaf_page->ValueAt(0);
+  MappingType curr_map = {curr_key, curr_val};
+  INDEXITERATOR_TYPE iterator("first_iterator", bpm_, comparator_, curr_page, curr_slot, curr_key, curr_val, curr_map, leaf_max_size_, internal_max_size_);
+  return iterator;
+}
 
 /*
  * Input parameter is low key, find the leaf page that contains the input key
@@ -302,7 +370,15 @@ auto BPLUSTREE_TYPE::Begin() -> INDEXITERATOR_TYPE { return INDEXITERATOR_TYPE()
  * @return : index iterator
  */
 INDEX_TEMPLATE_ARGUMENTS
-auto BPLUSTREE_TYPE::Begin(const KeyType &key) -> INDEXITERATOR_TYPE { return INDEXITERATOR_TYPE(); }
+auto BPLUSTREE_TYPE::Begin(const KeyType &key) -> INDEXITERATOR_TYPE {
+  auto iterator = Begin();
+  for (; iterator!=End(); ++iterator) {
+    if (comparator_((*iterator).first, key) == 0) {
+      return iterator;
+    }
+  }
+  return INDEXITERATOR_TYPE(std::move(comparator_));
+}
 
 /*
  * Input parameter is void, construct an index iterator representing the end
@@ -310,7 +386,15 @@ auto BPLUSTREE_TYPE::Begin(const KeyType &key) -> INDEXITERATOR_TYPE { return IN
  * @return : index iterator
  */
 INDEX_TEMPLATE_ARGUMENTS
-auto BPLUSTREE_TYPE::End() -> INDEXITERATOR_TYPE { return INDEXITERATOR_TYPE(); }
+auto BPLUSTREE_TYPE::End() -> INDEXITERATOR_TYPE {
+  auto iterator = Begin();
+  for (; ; ++iterator) {
+    if (iterator.IsEnd()) {
+      return iterator;
+    }
+  }
+  return INDEXITERATOR_TYPE(std::move(comparator_));
+}
 
 /**
  * @return Page id of the root of this tree

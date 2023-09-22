@@ -30,6 +30,7 @@ void B_PLUS_TREE_LEAF_PAGE_TYPE::Init(int max_size) {
   SetPageType(IndexPageType::LEAF_PAGE);
   SetMaxSize(max_size);
   SetSize(0);
+  SetNextPageId(INVALID_PAGE_ID);
 }
 
 /**
@@ -48,7 +49,7 @@ void B_PLUS_TREE_LEAF_PAGE_TYPE::SetNextPageId(page_id_t next_page_id) { next_pa
 INDEX_TEMPLATE_ARGUMENTS
 auto B_PLUS_TREE_LEAF_PAGE_TYPE::KeyAt(int index) const -> KeyType {
   // replace with your own code
-  if (index >= 0 && index <= GetMaxSize()) {  // leaf node allows non-zero key
+  if (index >= 0 && index < GetMaxSize()) {  // leaf node allows non-zero key
     KeyType key = array_[index].first;
     return key;
   }
@@ -57,7 +58,7 @@ auto B_PLUS_TREE_LEAF_PAGE_TYPE::KeyAt(int index) const -> KeyType {
 INDEX_TEMPLATE_ARGUMENTS
 auto B_PLUS_TREE_LEAF_PAGE_TYPE::ValueAt(int index) const -> ValueType {
   // replace with your own code
-  if (index >= 0 && index <= GetMaxSize()) {  // leaf node allows non-zero key
+  if (index >= 0 && index < GetMaxSize()) {  // leaf node allows non-zero key
     ValueType val = array_[index].second;
     return val;
   }
