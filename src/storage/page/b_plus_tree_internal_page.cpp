@@ -28,6 +28,7 @@ void B_PLUS_TREE_INTERNAL_PAGE_TYPE::Init(int max_size) {
   SetPageType(IndexPageType::INTERNAL_PAGE);
   SetMaxSize(max_size);
   SetSize(1);  // 默认是有一个空槽的，只不过第一个槽是valid，但依然占据了位置；
+  SetValueAt(0, INVALID_PAGE_ID);
 }
 /*
  * Helper method to get/set the key associated with input "index"(a.k.a
@@ -40,6 +41,7 @@ auto B_PLUS_TREE_INTERNAL_PAGE_TYPE::KeyAt(int index) const -> KeyType {
     KeyType key = array_[index].first;
     return key;
   }
+  std::cout << "out of internal range" << std::endl;
   return {};
 }
 
@@ -69,6 +71,7 @@ auto B_PLUS_TREE_INTERNAL_PAGE_TYPE::ValueAt(int index) const -> ValueType {
     // }
     return array_[index].second;
   }
+  std::cout << "out of internal range" << std::endl;
   return {};
 }
 

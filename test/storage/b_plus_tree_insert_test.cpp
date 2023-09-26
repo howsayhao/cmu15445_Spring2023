@@ -101,8 +101,6 @@ TEST(BPlusTreeTests, InsertTest2) {
     EXPECT_EQ(rids[0].GetSlotNum(), value);
   }
 
-  // std::cout << "-------------------------a smooth line------------------------" << std::endl;
-
   int64_t size = 0;
   bool is_present;
 
@@ -163,6 +161,8 @@ TEST(BPlusTreeTests, InsertTest3) {
     EXPECT_EQ(rids[0].GetSlotNum(), value);
   }
 
+  std::cout << "-------------------------a smooth line------------------------" << std::endl;
+
   int64_t start_key = 1;
   int64_t current_key = start_key;
   index_key.SetFromInteger(start_key);
@@ -174,6 +174,8 @@ TEST(BPlusTreeTests, InsertTest3) {
   }
 
   EXPECT_EQ(current_key, keys.size() + 1);
+
+  std::cout << "-------------------------a smooth line------------------------" << std::endl;
 
   start_key = 3;
   current_key = start_key;
