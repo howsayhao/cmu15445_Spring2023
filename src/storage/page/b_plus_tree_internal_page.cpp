@@ -37,26 +37,30 @@ void B_PLUS_TREE_INTERNAL_PAGE_TYPE::Init(int max_size) {
 INDEX_TEMPLATE_ARGUMENTS
 auto B_PLUS_TREE_INTERNAL_PAGE_TYPE::KeyAt(int index) const -> KeyType {
   // replace with your own code
-  if (index >= 1 && index <= GetSize()) {  // index should be valid and non-zero
+  if (index >= 1 && index < GetSize()) {  // index should be valid and non-zero
     KeyType key = array_[index].first;
     return key;
   }
-  std::cout << "out of internal range" << std::endl;
+  std::cout << "key at, out of internal range" << std::endl;
   return {};
 }
 
 INDEX_TEMPLATE_ARGUMENTS
 void B_PLUS_TREE_INTERNAL_PAGE_TYPE::SetKeyAt(int index, const KeyType &key) {
-  // if (index >= 1 && index < GetSize()) {
-  array_[index].first = key;
-  // }
+  if (index >= 1 && index < GetSize()) {
+    array_[index].first = key;
+    return;
+  }
+  std::cout << "set key, out of internal range" << std::endl;
 }
 
 INDEX_TEMPLATE_ARGUMENTS
 void B_PLUS_TREE_INTERNAL_PAGE_TYPE::SetValueAt(int index, const ValueType &value) {
-  // if (index >= 0 && index < GetSize()) {
-  array_[index].second = value;
-  // }
+  if (index >= 0 && index < GetSize()) {
+    array_[index].second = value;
+    return;
+  }
+  std::cout << "set value, out of internal range" << std::endl;
 }
 
 /*
@@ -71,7 +75,7 @@ auto B_PLUS_TREE_INTERNAL_PAGE_TYPE::ValueAt(int index) const -> ValueType {
     // }
     return array_[index].second;
   }
-  std::cout << "out of internal range" << std::endl;
+  std::cout << "value at, out of internal range" << std::endl;
   return {};
 }
 

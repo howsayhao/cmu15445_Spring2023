@@ -1,10 +1,12 @@
 #include <sstream>
 #include <string>
 
+#include "common/config.h"
 #include "common/exception.h"
 #include "common/logger.h"
 #include "common/rid.h"
 #include "storage/index/b_plus_tree.h"
+#include "storage/page/b_plus_tree_header_page.h"
 
 namespace bustub {
 
@@ -45,37 +47,25 @@ auto BPLUSTREE_TYPE::IsEmpty() const -> bool {
 INDEX_TEMPLATE_ARGUMENTS
 auto BPLUSTREE_TYPE::GetValue(const KeyType &key, std::vector<ValueType> *result, Transaction *txn) -> bool {
   // 找到叶子结点，如果没有则返回false
-  std::cout << "get" << std::endl;
   if (IsEmpty()) {
     return false;
   }
   ReadPageGuard guard = bpm_->FetchPageRead(GetRootPageId());
   auto curr_page = guard.template As<BPlusTreePage>();
   while (!curr_page->IsLeafPage()) {
-    std::cout << guard.PageId() << std::endl;
     auto *internal_page = reinterpret_cast<const InternalPage *>(curr_page);
-    // std::cout << internal_page->ValueAt(0) << std::endl;
-    // for (int i = 1; i < internal_page->GetSize(); i++) {
-      // std::cout << internal_page->KeyAt(i) << " " << internal_page->ValueAt(i) << std::endl;
-    // }
     for (int i = 1; i < internal_page->GetSize(); i++) {  // 注意，这里的getsize是已经包括了空槽的了，所以<
-      std::cout << "compare: " << key << " " << comparator_(key, internal_page->KeyAt(i)) << std::endl;
-      std::cout << internal_page->KeyAt(i) << " " << internal_page->ValueAt(i) << std::endl;
       if (comparator_(key, internal_page->KeyAt(i)) < 0) {
         guard = bpm_->FetchPageRead(internal_page->ValueAt(i - 1));
-        std::cout << "find slot: " << i << std::endl;
         break;
       }
       if (i + 1 == internal_page->GetSize()) {  // 取最后一个child node
-        // std::cout << "final child" << internal_page->ValueAt(i) << std::endl;
         guard = bpm_->FetchPageRead(internal_page->ValueAt(i));
       }
     }
     curr_page = guard.template As<BPlusTreePage>();
   }
-  std::cout << guard.PageId() << std::endl;
   auto *leaf_page = reinterpret_cast<const LeafPage *>(curr_page);
-  // std::cout << "leaf" << std::endl;
 
   // 找到叶子结点后判断是否有对应Key;
   for (int i = 0; i < leaf_page->GetSize(); i++) {
@@ -102,7 +92,7 @@ INDEX_TEMPLATE_ARGUMENTS
 auto BPLUSTREE_TYPE::Insert(const KeyType &key, const ValueType &value, Transaction *txn) -> bool {
   // Declaration of context instance.
   Context ctx;
-  // std::cout << "start insert" << std::endl;
+  ctx.write_set_.clear();
   // 处理root page为空的情况
   if (IsEmpty()) {
     WritePageGuard guard = bpm_->FetchPageWrite(header_page_id_);
@@ -114,8 +104,8 @@ auto BPLUSTREE_TYPE::Insert(const KeyType &key, const ValueType &value, Transact
     auto root_page = guard.template AsMut<LeafPage>();
     root_page->Init();
     root_page->SetMaxSize(leaf_max_size_);
-    root_page->SetAt(0, key, value);
     root_page->IncreaseSize(1);
+    root_page->SetAt(0, key, value);
     return true;
   }
   // 找到叶子结点并存储必要路径
@@ -124,7 +114,6 @@ auto BPLUSTREE_TYPE::Insert(const KeyType &key, const ValueType &value, Transact
   auto curr_page = guard.template As<InternalPage>();
   ctx.write_set_.push_back(std::move(guard));
   while (!curr_page->IsLeafPage()) {
-    // std::cout << "collecting" << std::endl;
     WritePageGuard guard;
     for (int i = 1; i < curr_page->GetSize(); i++) {  // 注意，这里的getsize是已经包括了空槽的了，所以<
       if (comparator_(key, curr_page->KeyAt(i)) < 0) {
@@ -141,22 +130,29 @@ auto BPLUSTREE_TYPE::Insert(const KeyType &key, const ValueType &value, Transact
     }
     ctx.write_set_.push_back(std::move(guard));
   }
-  // std::cout << "get collected" << std::endl;
   // 进行insert操作，首先处理两个小case
-  auto orign_page_id = ctx.write_set_.back().PageId();
-  auto leaf_page = ctx.write_set_.back().AsMut<LeafPage>();
+  auto leaf_guard =
+      std::move(ctx.write_set_.back());  // 下面两行注释掉的是有问题的
+                                         // 因为leaf_page仅仅是保存了这个page在mem的地址
+                                         // 当pop_back之后page_guard被销毁，这个mem的page可能会被回收
+                                         // 那么之后如果又new一个新的page很可能就会被分配在这个mem的地址上
+                                         // 这样就会有问题，以为是对前者的操作实际是对后者，后面也有这种错误
+                                         // 另外吐槽一下，check-lint竟然不允许/**/，是我操作不对吗？
+  // auto orign_page_id = ctx.write_set_.back().PageId();
+  // auto leaf_page = ctx.write_set_.back().AsMut<LeafPage>();
+  auto orign_page_id = leaf_guard.PageId();
+  auto leaf_page = leaf_guard.template AsMut<LeafPage>();
+
   ctx.write_set_.pop_back();
   for (int i = 0; i < leaf_page->GetSize(); i++) {  // 先判断duplicate_key
     if (comparator_(leaf_page->KeyAt(i), key) == 0) {
       return false;
     }
   }
-  // std::cout << "leaf max:" << leaf_page->GetMaxSize() << std::endl;
   MappingType tmp;
   MappingType ins = {key, value};
   int insert_slot = -1;
   if (leaf_page->GetSize() < leaf_page->GetMaxSize()) {  // 不会有split操作
-    // std::cout << "leaf size:" << leaf_page->GetSize() << std::endl;
     for (int i = 0; i < leaf_page->GetSize(); i++) {
       if (comparator_(key, leaf_page->KeyAt(i)) < 0 && insert_slot == -1) {
         insert_slot = i;
@@ -167,12 +163,10 @@ auto BPLUSTREE_TYPE::Insert(const KeyType &key, const ValueType &value, Transact
         ins = tmp;
       }
     }
-    leaf_page->SetAt(leaf_page->GetSize(), ins.first, ins.second);
     leaf_page->IncreaseSize(1);
+    leaf_page->SetAt(leaf_page->GetSize() - 1, ins.first, ins.second);
     return true;
   }
-  // std::cout << "to be splited" << std::endl;
-  // std::cout << "path length:" << ctx.write_set_.size() << std::endl;
   // 处理一般性的insert
   // 每次分裂，传给上面的无非就是一个page的id(只有page_id，因为internal不存slot_num)，确定增添位置的key,以及将增加的key，三个东西
   KeyType orign_key;
@@ -186,9 +180,8 @@ auto BPLUSTREE_TYPE::Insert(const KeyType &key, const ValueType &value, Transact
   split_leaf_page->SetMaxSize(leaf_max_size_);
   split_leaf_page->SetSize((leaf_page->GetMaxSize() + 1) - (leaf_page->GetMaxSize() + 1) / 2);
   for (int i = 0; i < leaf_page->GetMaxSize(); i++) {
-    if (comparator_(key, leaf_page->KeyAt(i)) < 0 &&
-        insert_slot == -1) {  // 找到槽位0 // btw，这个方法确实不如前面的那个，代码麻烦了不少
-      insert_slot = 0;
+    if (comparator_(key, leaf_page->KeyAt(i)) < 0 && insert_slot == -1) {
+      insert_slot = i;
     }
     if (insert_slot != -1 || i >= (leaf_page->GetMaxSize() + 1) / 2) {  // 按序插入并必要地移到split_page上
       if (i < (leaf_page->GetMaxSize() + 1) / 2) {
@@ -215,27 +208,26 @@ auto BPLUSTREE_TYPE::Insert(const KeyType &key, const ValueType &value, Transact
 
   // 不断迭代上推，直到只剩最后一个non-split parent，如果没有non-split parent那么全部推出
   // 这一过程的行为和处理叶子的相似但不一样，所以不能合用代码
-  WritePageGuard parent_guard;
   page_id_t new_split_page_id;
   bool to_split_root = !ctx.write_set_.empty() && ctx.write_set_.front().PageId() == GetRootPageId() &&
                        ctx.write_set_.front().template AsMut<InternalPage>()->GetSize() ==
                            ctx.write_set_.front().template AsMut<InternalPage>()->GetMaxSize();
   while (ctx.write_set_.size() > 1 || (to_split_root && !ctx.write_set_.empty())) {
-    // std::cout << "search for non-split node" << std::endl;
-    orign_page_id = ctx.write_set_.back().PageId();
-    auto parent_page = ctx.write_set_.back().template AsMut<InternalPage>();
+    WritePageGuard parent_guard = std::move(ctx.write_set_.back());
     ctx.write_set_.pop_back();
+    orign_page_id = parent_guard.PageId();
+    auto parent_page = parent_guard.template AsMut<InternalPage>();
     bpm_->NewPageGuarded(&new_split_page_id);
     auto split_guard = bpm_->FetchPageWrite(new_split_page_id);
     auto split_page = split_guard.template AsMut<InternalPage>();
     split_page->Init();
     split_page->SetMaxSize(internal_max_size_);
     split_page->SetSize((parent_page->GetMaxSize() + 1) - (parent_page->GetMaxSize() / 2 + 1) - 1 + 1);
+    int insert_slot = -1;
     KeyType ktmp;
     page_id_t ptmp;
     KeyType kins = split_key;
     page_id_t pins = split_page_id;
-    int insert_slot = -1;
     for (int i = 1; i < parent_page->GetMaxSize(); i++) {
       if (comparator_(split_key, parent_page->KeyAt(i)) < 0 && insert_slot == -1) {  // 找到槽位
         insert_slot = i;
@@ -280,7 +272,6 @@ auto BPLUSTREE_TYPE::Insert(const KeyType &key, const ValueType &value, Transact
 
   // 没有non-split parent，意味着需要重建root
   if (ctx.write_set_.empty()) {
-    // std::cout << "new root for root split" << std::endl;
     WritePageGuard guard = bpm_->FetchPageWrite(header_page_id_);
     auto root_header_page = guard.template AsMut<BPlusTreeHeaderPage>();
     page_id_t root_page_id;
@@ -297,14 +288,14 @@ auto BPLUSTREE_TYPE::Insert(const KeyType &key, const ValueType &value, Transact
     return true;
   }
 
-  // std::cout << "non-split insert" << std::endl;
   // 最后的non-split结点处理
-  auto parent_page = ctx.write_set_.back().template AsMut<InternalPage>();
+  auto parent_guard = std::move(ctx.write_set_.back());
+  auto parent_page = parent_guard.template AsMut<InternalPage>();
   ctx.write_set_.pop_back();
-  KeyType ktmp;
-  page_id_t ptmp;
   KeyType kins = split_key;
+  KeyType ktmp;
   page_id_t pins = split_page_id;
+  page_id_t ptmp;
   insert_slot = -1;
   for (int i = 1; i < parent_page->GetSize(); i++) {
     if (comparator_(split_key, parent_page->KeyAt(i)) < 0 && insert_slot == -1) {  // 找到槽位
@@ -319,9 +310,9 @@ auto BPLUSTREE_TYPE::Insert(const KeyType &key, const ValueType &value, Transact
       pins = ptmp;
     }
   }
-  parent_page->SetKeyAt(parent_page->GetSize(), kins);
-  parent_page->SetValueAt(parent_page->GetSize(), pins);
   parent_page->IncreaseSize(1);
+  parent_page->SetKeyAt(parent_page->GetSize() - 1, kins);
+  parent_page->SetValueAt(parent_page->GetSize() - 1, pins);
   return true;
 }
 
@@ -339,7 +330,135 @@ INDEX_TEMPLATE_ARGUMENTS
 void BPLUSTREE_TYPE::Remove(const KeyType &key, Transaction *txn) {
   // Declaration of context instance.
   Context ctx;
-  (void)ctx;
+  ctx.write_set_.clear();
+  if (IsEmpty()) {
+    return ;
+  }
+
+  // 先找到叶子结点，同时存储路径
+  ctx.root_page_id_ = GetRootPageId();
+  WritePageGuard guard = bpm_->FetchPageWrite(GetRootPageId());
+  auto curr_page = guard.template As<InternalPage>();
+  ctx.write_set_.push_back(std::move(guard));
+  while (!curr_page->IsLeafPage()) {
+    WritePageGuard guard;
+    for (int i = 1; i < curr_page->GetSize(); i++) {
+      if (comparator_(key, curr_page->KeyAt(i)) < 0) {
+        guard = bpm_->FetchPageWrite(curr_page->ValueAt(i - 1));
+        break;
+      }
+      if (i + 1 == curr_page->GetSize()) {
+        guard = bpm_->FetchPageWrite(curr_page->ValueAt(i));
+      }
+    }
+    curr_page = guard.template As<InternalPage>();
+    if (curr_page->GetSize() > curr_page->GetMinSize()) {
+      ctx.write_set_.clear();
+    }
+    ctx.write_set_.push_back(std::move(guard));
+  }
+
+  // 到达叶子结点后，判断key的情况，先处理两个小case
+  auto leaf_guard = std::move(ctx.write_set_.back());
+  auto leaf_page = leaf_guard.template AsMut<LeafPage>();
+  ctx.write_set_.pop_back();
+  int delete_slot = -1;
+    // 如果树非空，但找不到对应结点key，直接返回
+    for (int i=0; i<leaf_page->GetSize(); i++) {
+      if (comparator_(key, leaf_page->KeyAt(i)) == 0) {
+        delete_slot = i; // 找到要删的key的位置
+        break;
+      }
+    }
+    if (delete_slot == -1) {
+      return ;
+    }
+    // 先删key，如果不需要merge（大小符合或只有根结点,因为根结点的min为1），直接返回
+    if (delete_slot != leaf_page->GetSize()-1) {
+      for (int i=delete_slot+1; i<leaf_page->GetSize(); i++) {
+        leaf_page->SetAt(i-1, leaf_page->KeyAt(i), leaf_page->ValueAt(i));
+      }
+    }
+    leaf_page->IncreaseSize(-1);
+    if (leaf_page->GetSize() >= leaf_page->GetMinSize() || leaf_guard.PageId() == GetRootPageId()) {
+      if (leaf_page->GetSize() == 0) { // 只可能是根结点，此时树为空，
+                                       // 因而为了保持和之前代码的一致性应该删除该page
+        leaf_guard.Drop();
+        auto header_page = bpm_->FetchPageWrite(header_page_id_).template AsMut<BPlusTreeHeaderPage>();
+        header_page->root_page_id_ = INVALID_PAGE_ID;
+      }
+      return ;
+    }
+
+  // 迭代删除的策略如下，总体为先借后merge，如果借就能解决问题那么甚至不需要再迭代，调整后直接输出即可
+    // 对叶子：
+      // 借：优先向右兄弟借，借不来再向左兄弟借；若向右兄弟借则需要注意更新parent对应右兄弟的key，反正同理；
+      // 合并：优先右兄弟，没有右兄弟才与左兄弟合并；合并之后删去对应的parent的key即可；
+    // 对内部结点：
+      // 借：也是优先向右兄弟借；不同的是借来的是给parent，然后把parent对应的key拿过来以维持搜索树的特征；
+      // 合并：也是优先右兄弟；若与右兄弟合并则需要删去最右边的key换上parent的对应key与兄弟合并，反正同理；
+    // 因为没有严格的更新，因而删除之后并不能保证每一个internal_key都有唯一的leaf_key对应；
+  // 所以需要先将叶子结点的merge删除问题解决掉，提供给上层一个已经初步删除后的parent即可(<min)
+  auto parent_guard = std::move(ctx.write_set_.back());  // leaf的merge删除用到需要parent
+                                                         // 这里需要std::move，因为page_guard的直接复制被删掉了，需要右值引用
+  ctx.write_set_.pop_back();
+  auto parent_page = parent_guard.template AsMut<InternalPage>();
+  int orign_slot_in_parent = -1;
+  for (int i=1; i<parent_page->GetSize(); i++) {
+    if (comparator_(key, parent_page->KeyAt(i)) < 0) {
+      orign_slot_in_parent = i-1;
+      break;
+    }
+  }
+  LeafPage* left_leaf_page = nullptr;
+  LeafPage* right_leaf_page = nullptr;
+  WritePageGuard sibling_guard;
+  bool could_borrow = false;
+  if (orign_slot_in_parent == 0) {  // 没有左兄弟
+    sibling_guard = bpm_->FetchPageWrite(parent_page->ValueAt(orign_slot_in_parent+1));
+    auto sibling_page = sibling_guard.template AsMut<LeafPage>();
+    if (sibling_page->GetSize() > sibling_page->GetMinSize()) {
+      could_borrow = true;
+    }
+    left_leaf_page = leaf_page;
+    right_leaf_page = sibling_page;
+  } else if (orign_slot_in_parent == -1) {  // 没有右兄弟
+
+  } else {  // 左右兄弟都有，需要判别
+
+  }
+
+  if (could_borrow) { // 可借，那么删除结束，更新对应key即可
+    left_leaf_page->IncreaseSize(1);
+    left_leaf_page->SetAt(left_leaf_page->GetSize()-1, parent_page->KeyAt(orign_slot_in_parent+1), right_leaf_page->ValueAt(0));
+    parent_page->SetKeyAt(orign_slot_in_parent+1, right_leaf_page->KeyAt(0));
+    for (int i=1; i<right_leaf_page->GetSize(); i++) {
+      right_leaf_page->SetAt(i-1, right_leaf_page->KeyAt(i), right_leaf_page->ValueAt(i));
+    }
+    right_leaf_page->IncreaseSize(-1);
+    return ;
+  }
+  // 否则需要进行合并
+  int i = left_leaf_page->GetSize();
+  left_leaf_page->IncreaseSize(right_leaf_page->GetSize());
+  for (int j=0; j<right_leaf_page->GetSize(); i++, j++) {
+    left_leaf_page->SetAt(i, right_leaf_page->KeyAt(j), right_leaf_page->ValueAt(j));
+  }
+  sibling_guard.Drop();
+  for (int i=orign_slot_in_parent+2; i<parent_page->GetSize(); i++) {
+    parent_page->SetKeyAt(i-1, parent_page->KeyAt(i));
+    parent_page->SetValueAt(i-1, parent_page->ValueAt(i));
+  }
+  ctx.write_set_.push_back(std::move(parent_guard)); // 将修改后的parent结点返回；
+  // 需要进行迭代merge删除，并保留最顶层的parent结点
+  while (ctx.write_set_.size() > 1) {  // 到这一步其实已经保证至少有两个结点在手了，
+                                        // 现在的目的是将头尾结点之间的所有结点都迭代推出处理掉
+    WritePageGuard curr_guard = std::move(ctx.write_set_.back());
+    ctx.write_set_.pop_back();
+  }
+    // 如果需要根结点merge删除
+    // 如果不需要，那么最顶层的parent结点只需要做基本的删除即可，不需要merge
+      // 实际上不需要任何操作了；
 }
 
 /*****************************************************************************

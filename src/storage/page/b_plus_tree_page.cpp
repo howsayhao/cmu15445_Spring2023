@@ -50,7 +50,7 @@ auto BPlusTreePage::GetMinSize() const -> int {
   if (IsLeafPage()) {
     return max_size_ / 2;
   }
-  return (max_size_ + 1) / 2;
+  return (max_size_ + 1) / 2;  // max_size不会<=2，那个网站里设为2都会让你重新输的
 }  // not ceiling?
 
 }  // namespace bustub

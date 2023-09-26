@@ -14,12 +14,11 @@
 #include <cstdio>
 #include <random>
 
-// #include "buffer/buffer_pool_manager.h"
-// #include "gtest/gtest.h"
-// #include "storage/disk/disk_manager_memory.h"
-// #include "storage/index/b_plus_tree.h"
-// #include "test_util.h"  // NOLINT
-
+#include "buffer/buffer_pool_manager.h"
+#include "gtest/gtest.h"
+#include "storage/disk/disk_manager_memory.h"
+#include "storage/index/b_plus_tree.h"
+#include "test_util.h"  // NOLINT
 
 // #include "../../src/include/buffer/buffer_pool_manager.h"
 // #include "../../src/include/gtest/gtest.h"
@@ -54,7 +53,7 @@ TEST(BPlusTreeTests, ScaleTest) {  // NOLINT
   // create transaction
   auto *transaction = new Transaction(0);
 
-  int64_t scale = 500;
+  int64_t scale = 5000;
   std::vector<int64_t> keys;
   for (int64_t key = 1; key < scale; key++) {
     keys.push_back(key);
@@ -84,7 +83,7 @@ TEST(BPlusTreeTests, ScaleTest) {  // NOLINT
     // auto ifempty = tree.Insert(index_key, rid, transaction);
     // std::cout << key << " " << ifempty << std::endl;
   }
-  tree.Print(bpm);
+  // tree.Print(bpm);
   //   index_key.SetFromInteger(133);
   //  auto ifempty = tree.GetValue(index_key, &rids);
   //   std::cout << "207"
