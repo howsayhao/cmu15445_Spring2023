@@ -7,6 +7,7 @@
 #include "common/rid.h"
 #include "storage/index/b_plus_tree.h"
 #include "storage/page/b_plus_tree_header_page.h"
+#include "storage/page/page_guard.h"
 
 namespace bustub {
 
@@ -32,6 +33,7 @@ BPLUSTREE_TYPE::BPlusTree(std::string name, page_id_t header_page_id, BufferPool
  */
 INDEX_TEMPLATE_ARGUMENTS
 auto BPLUSTREE_TYPE::IsEmpty() const -> bool {
+  // 我这里有点意识到为什么要专门搞一个header_page_id了，可以提高并发
   WritePageGuard guard = bpm_->FetchPageWrite(header_page_id_);
   auto root_header_page = guard.AsMut<BPlusTreeHeaderPage>();
   return root_header_page->root_page_id_ == INVALID_PAGE_ID;
@@ -47,7 +49,9 @@ auto BPLUSTREE_TYPE::IsEmpty() const -> bool {
 INDEX_TEMPLATE_ARGUMENTS
 auto BPLUSTREE_TYPE::GetValue(const KeyType &key, std::vector<ValueType> *result, Transaction *txn) -> bool {
   // 找到叶子结点，如果没有则返回false
+  rwlatch_.RLock();
   if (IsEmpty()) {
+    rwlatch_.RUnlock();
     return false;
   }
   ReadPageGuard guard = bpm_->FetchPageRead(GetRootPageId());
@@ -71,10 +75,12 @@ auto BPLUSTREE_TYPE::GetValue(const KeyType &key, std::vector<ValueType> *result
   for (int i = 0; i < leaf_page->GetSize(); i++) {
     if (comparator_(key, leaf_page->KeyAt(i)) == 0) {
       (*result).push_back(leaf_page->ValueAt(i));
+      rwlatch_.RUnlock();
       return true;
     }
   }
   std::cout << "not found" << std::endl;
+  rwlatch_.RUnlock();
   return false;
 }
 
@@ -91,6 +97,7 @@ auto BPLUSTREE_TYPE::GetValue(const KeyType &key, std::vector<ValueType> *result
 INDEX_TEMPLATE_ARGUMENTS
 auto BPLUSTREE_TYPE::Insert(const KeyType &key, const ValueType &value, Transaction *txn) -> bool {
   // Declaration of context instance.
+  rwlatch_.WLock();
   Context ctx;
   ctx.write_set_.clear();
   // 处理root page为空的情况
@@ -106,6 +113,7 @@ auto BPLUSTREE_TYPE::Insert(const KeyType &key, const ValueType &value, Transact
     root_page->SetMaxSize(leaf_max_size_);
     root_page->IncreaseSize(1);
     root_page->SetAt(0, key, value);
+    rwlatch_.WUnlock();
     return true;
   }
   // 找到叶子结点并存储必要路径
@@ -146,6 +154,7 @@ auto BPLUSTREE_TYPE::Insert(const KeyType &key, const ValueType &value, Transact
   ctx.write_set_.pop_back();
   for (int i = 0; i < leaf_page->GetSize(); i++) {  // 先判断duplicate_key
     if (comparator_(leaf_page->KeyAt(i), key) == 0) {
+      rwlatch_.WUnlock();
       return false;
     }
   }
@@ -165,6 +174,7 @@ auto BPLUSTREE_TYPE::Insert(const KeyType &key, const ValueType &value, Transact
     }
     leaf_page->IncreaseSize(1);
     leaf_page->SetAt(leaf_page->GetSize() - 1, ins.first, ins.second);
+    rwlatch_.WUnlock();
     return true;
   }
   // 处理一般性的insert
@@ -228,6 +238,7 @@ auto BPLUSTREE_TYPE::Insert(const KeyType &key, const ValueType &value, Transact
     page_id_t ptmp;
     KeyType kins = split_key;
     page_id_t pins = split_page_id;
+    KeyType new_split_key = split_key;
     for (int i = 1; i < parent_page->GetMaxSize(); i++) {
       if (comparator_(split_key, parent_page->KeyAt(i)) < 0 && insert_slot == -1) {  // 找到槽位
         insert_slot = i;
@@ -242,12 +253,12 @@ auto BPLUSTREE_TYPE::Insert(const KeyType &key, const ValueType &value, Transact
           pins = ptmp;
         } else if (i == (parent_page->GetMaxSize() / 2 + 1)) {
           if (insert_slot != -1) {
-            split_key = kins;
+            new_split_key = kins;
             split_page->SetValueAt(0, pins);
             kins = parent_page->KeyAt(i);
             pins = parent_page->ValueAt(i);
           } else {
-            split_key = parent_page->KeyAt(i);
+            new_split_key = parent_page->KeyAt(i);
             split_page->SetValueAt(0, parent_page->ValueAt(i));
           }
         } else {
@@ -268,6 +279,7 @@ auto BPLUSTREE_TYPE::Insert(const KeyType &key, const ValueType &value, Transact
     split_page->SetValueAt(split_page->GetSize() - 1, pins);
     orign_key = parent_page->KeyAt(1);
     split_page_id = new_split_page_id;
+    split_key = new_split_key;
   }
 
   // 没有non-split parent，意味着需要重建root
@@ -285,6 +297,7 @@ auto BPLUSTREE_TYPE::Insert(const KeyType &key, const ValueType &value, Transact
     root_page->SetKeyAt(1, split_key);
     root_page->SetValueAt(1, split_page_id);
     root_page->SetValueAt(0, orign_page_id);
+    rwlatch_.WUnlock();
     return true;
   }
 
@@ -313,6 +326,7 @@ auto BPLUSTREE_TYPE::Insert(const KeyType &key, const ValueType &value, Transact
   parent_page->IncreaseSize(1);
   parent_page->SetKeyAt(parent_page->GetSize() - 1, kins);
   parent_page->SetValueAt(parent_page->GetSize() - 1, pins);
+  rwlatch_.WUnlock();
   return true;
 }
 
@@ -328,16 +342,18 @@ auto BPLUSTREE_TYPE::Insert(const KeyType &key, const ValueType &value, Transact
  */
 INDEX_TEMPLATE_ARGUMENTS
 void BPLUSTREE_TYPE::Remove(const KeyType &key, Transaction *txn) {
-  // Declaration of context instance.
+  // 锁控制，目前为一把大锁
+  rwlatch_.WLock();
   Context ctx;
   ctx.write_set_.clear();
   if (IsEmpty()) {
-    return ;
+    rwlatch_.WUnlock();
+    return;
   }
 
   // 先找到叶子结点，同时存储路径
   ctx.root_page_id_ = GetRootPageId();
-  WritePageGuard guard = bpm_->FetchPageWrite(GetRootPageId());
+  WritePageGuard guard = bpm_->FetchPageWrite(ctx.root_page_id_);
   auto curr_page = guard.template As<InternalPage>();
   ctx.write_set_.push_back(std::move(guard));
   while (!curr_page->IsLeafPage()) {
@@ -363,102 +379,322 @@ void BPLUSTREE_TYPE::Remove(const KeyType &key, Transaction *txn) {
   auto leaf_page = leaf_guard.template AsMut<LeafPage>();
   ctx.write_set_.pop_back();
   int delete_slot = -1;
-    // 如果树非空，但找不到对应结点key，直接返回
-    for (int i=0; i<leaf_page->GetSize(); i++) {
-      if (comparator_(key, leaf_page->KeyAt(i)) == 0) {
-        delete_slot = i; // 找到要删的key的位置
-        break;
-      }
-    }
-    if (delete_slot == -1) {
-      return ;
-    }
-    // 先删key，如果不需要merge（大小符合或只有根结点,因为根结点的min为1），直接返回
-    if (delete_slot != leaf_page->GetSize()-1) {
-      for (int i=delete_slot+1; i<leaf_page->GetSize(); i++) {
-        leaf_page->SetAt(i-1, leaf_page->KeyAt(i), leaf_page->ValueAt(i));
-      }
-    }
-    leaf_page->IncreaseSize(-1);
-    if (leaf_page->GetSize() >= leaf_page->GetMinSize() || leaf_guard.PageId() == GetRootPageId()) {
-      if (leaf_page->GetSize() == 0) { // 只可能是根结点，此时树为空，
-                                       // 因而为了保持和之前代码的一致性应该删除该page
-        leaf_guard.Drop();
-        auto header_page = bpm_->FetchPageWrite(header_page_id_).template AsMut<BPlusTreeHeaderPage>();
-        header_page->root_page_id_ = INVALID_PAGE_ID;
-      }
-      return ;
-    }
-
-  // 迭代删除的策略如下，总体为先借后merge，如果借就能解决问题那么甚至不需要再迭代，调整后直接输出即可
-    // 对叶子：
-      // 借：优先向右兄弟借，借不来再向左兄弟借；若向右兄弟借则需要注意更新parent对应右兄弟的key，反正同理；
-      // 合并：优先右兄弟，没有右兄弟才与左兄弟合并；合并之后删去对应的parent的key即可；
-    // 对内部结点：
-      // 借：也是优先向右兄弟借；不同的是借来的是给parent，然后把parent对应的key拿过来以维持搜索树的特征；
-      // 合并：也是优先右兄弟；若与右兄弟合并则需要删去最右边的key换上parent的对应key与兄弟合并，反正同理；
-    // 因为没有严格的更新，因而删除之后并不能保证每一个internal_key都有唯一的leaf_key对应；
-  // 所以需要先将叶子结点的merge删除问题解决掉，提供给上层一个已经初步删除后的parent即可(<min)
-  auto parent_guard = std::move(ctx.write_set_.back());  // leaf的merge删除用到需要parent
-                                                         // 这里需要std::move，因为page_guard的直接复制被删掉了，需要右值引用
-  ctx.write_set_.pop_back();
-  auto parent_page = parent_guard.template AsMut<InternalPage>();
-  int orign_slot_in_parent = -1;
-  for (int i=1; i<parent_page->GetSize(); i++) {
-    if (comparator_(key, parent_page->KeyAt(i)) < 0) {
-      orign_slot_in_parent = i-1;
+  // 如果树非空，但找不到对应结点key，直接返回；树为空的情况前面已经处理掉了；
+  for (int i = 0; i < leaf_page->GetSize(); i++) {
+    if (comparator_(key, leaf_page->KeyAt(i)) == 0) {
+      delete_slot = i;  // 找到要删的key的位置
       break;
     }
   }
-  LeafPage* left_leaf_page = nullptr;
-  LeafPage* right_leaf_page = nullptr;
-  WritePageGuard sibling_guard;
-  bool could_borrow = false;
-  if (orign_slot_in_parent == 0) {  // 没有左兄弟
-    sibling_guard = bpm_->FetchPageWrite(parent_page->ValueAt(orign_slot_in_parent+1));
-    auto sibling_page = sibling_guard.template AsMut<LeafPage>();
-    if (sibling_page->GetSize() > sibling_page->GetMinSize()) {
-      could_borrow = true;
+  if (delete_slot == -1) {
+    rwlatch_.WUnlock();
+    return;
+  }
+  // 先删key，如果不需要merge（大小符合或只有根结点,因为根结点的min为1），直接返回
+  for (int i = delete_slot + 1; i < leaf_page->GetSize(); i++) {
+    leaf_page->SetAt(i - 1, leaf_page->KeyAt(i), leaf_page->ValueAt(i));
+  }
+  leaf_page->IncreaseSize(-1);
+  if (leaf_page->GetSize() >= leaf_page->GetMinSize() || leaf_guard.PageId() == ctx.root_page_id_) {
+    if (leaf_page->GetSize() == 0) {  // 只可能是根结点，此时树为空，
+                                      // 因而为了保持和之前代码的一致性应该删除该page
+      leaf_guard.Drop();
+      auto header_page = bpm_->FetchPageWrite(header_page_id_).template AsMut<BPlusTreeHeaderPage>();
+      header_page->root_page_id_ = INVALID_PAGE_ID;
     }
-    left_leaf_page = leaf_page;
-    right_leaf_page = sibling_page;
-  } else if (orign_slot_in_parent == -1) {  // 没有右兄弟
-
-  } else {  // 左右兄弟都有，需要判别
-
+    rwlatch_.WUnlock();
+    return;
   }
 
-  if (could_borrow) { // 可借，那么删除结束，更新对应key即可
-    left_leaf_page->IncreaseSize(1);
-    left_leaf_page->SetAt(left_leaf_page->GetSize()-1, parent_page->KeyAt(orign_slot_in_parent+1), right_leaf_page->ValueAt(0));
-    parent_page->SetKeyAt(orign_slot_in_parent+1, right_leaf_page->KeyAt(0));
-    for (int i=1; i<right_leaf_page->GetSize(); i++) {
-      right_leaf_page->SetAt(i-1, right_leaf_page->KeyAt(i), right_leaf_page->ValueAt(i));
+  // 迭代删除的策略如下，总体为先借后merge，如果借就能解决问题那么甚至不需要再迭代，调整后直接输出即可
+  // 对叶子：
+  // 借：优先向右兄弟借，借不来再向左兄弟借；若向右兄弟借则需要注意更新parent对应右兄弟的key，反之同理；
+  // 合并：优先右兄弟，没有右兄弟才与左兄弟合并；合并之后删去对应的parent的key即可；
+  // 对内部结点：
+  // 借：也是优先向右兄弟借；不同的是借来的给parent，同时拿parent过来以维持搜索树的特征；
+  // 合并：也是优先右兄弟；若与右兄弟合并则需要删去最右边的key换上parent的对应key与兄弟合并，反之同理；
+  // 因为没有严格的更新，因而删除之后并不能保证每一个internal_key都有唯一的leaf_key对应；
+  // 所以需要先将叶子结点的merge删除问题解决掉，提供给上层一个已经初步删除后的parent即可(<min)
+  auto parent_guard =
+      std::move(ctx.write_set_.back());  // leaf的merge删除用到需要parent
+                                         // 这里需要std::move，因为page_guard的直接复制被删掉了，需要右值引用
+  ctx.write_set_.pop_back();
+  auto parent_page = parent_guard.template AsMut<InternalPage>();
+  int orign_slot_in_parent = -1;
+  for (int i = 1; i < parent_page->GetSize(); i++) {
+    if (comparator_(key, parent_page->KeyAt(i)) < 0) {
+      orign_slot_in_parent = i - 1;
+      break;
     }
-    right_leaf_page->IncreaseSize(-1);
-    return ;
   }
-  // 否则需要进行合并
-  int i = left_leaf_page->GetSize();
-  left_leaf_page->IncreaseSize(right_leaf_page->GetSize());
-  for (int j=0; j<right_leaf_page->GetSize(); i++, j++) {
-    left_leaf_page->SetAt(i, right_leaf_page->KeyAt(j), right_leaf_page->ValueAt(j));
+  WritePageGuard rsibling_guard;
+  WritePageGuard lsibling_guard;
+  if (orign_slot_in_parent == 0) {
+    // 没有左兄弟
+    rsibling_guard = bpm_->FetchPageWrite(parent_page->ValueAt(orign_slot_in_parent + 1));
+    auto rsibling_page = rsibling_guard.template AsMut<LeafPage>();
+    if (rsibling_page->GetSize() > rsibling_page->GetMinSize()) {
+      // 向右兄弟借
+      leaf_page->IncreaseSize(1);
+      leaf_page->SetAt(leaf_page->GetSize() - 1, rsibling_page->KeyAt(0), rsibling_page->ValueAt(0));
+      parent_page->SetKeyAt(orign_slot_in_parent + 1, rsibling_page->KeyAt(1));
+      for (int i = 1; i < rsibling_page->GetSize(); i++) {
+        rsibling_page->SetAt(i - 1, rsibling_page->KeyAt(i), rsibling_page->ValueAt(i));
+      }
+      rsibling_page->IncreaseSize(-1);
+      rwlatch_.WUnlock();
+      return;
+    }
+    // 与右兄弟合并
+    leaf_page->SetNextPageId(rsibling_page->GetNextPageId());
+    int i = leaf_page->GetSize();
+    leaf_page->IncreaseSize(rsibling_page->GetSize());
+    for (int j = 0; j < rsibling_page->GetSize(); i++, j++) {
+      leaf_page->SetAt(i, rsibling_page->KeyAt(j), rsibling_page->ValueAt(j));
+    }
+    rsibling_guard.Drop();
+    for (int i = orign_slot_in_parent + 2; i < parent_page->GetSize(); i++) {
+      parent_page->SetKeyAt(i - 1, parent_page->KeyAt(i));
+      parent_page->SetValueAt(i - 1, parent_page->ValueAt(i));
+    }
+    parent_page->IncreaseSize(-1);
+  } else if (orign_slot_in_parent == -1) {
+    // 没有右兄弟
+    orign_slot_in_parent = parent_page->GetSize() - 1;
+    lsibling_guard = bpm_->FetchPageWrite(parent_page->ValueAt(orign_slot_in_parent - 1));
+    auto lsibling_page = lsibling_guard.template AsMut<LeafPage>();
+    if (lsibling_page->GetSize() > lsibling_page->GetMinSize()) {
+      // 向左兄弟借
+      leaf_page->IncreaseSize(1);
+      for (int i = leaf_page->GetSize() - 1; i >= 1; i--) {
+        leaf_page->SetAt(i, leaf_page->KeyAt(i - 1), leaf_page->ValueAt(i - 1));
+      }
+      leaf_page->SetAt(0, lsibling_page->KeyAt(lsibling_page->GetSize() - 1),
+                       lsibling_page->ValueAt(lsibling_page->GetSize() - 1));
+      parent_page->SetKeyAt(orign_slot_in_parent, lsibling_page->KeyAt(lsibling_page->GetSize() - 1));
+      lsibling_page->IncreaseSize(-1);
+      rwlatch_.WUnlock();
+      return;
+    }
+    // 与左兄弟合并
+    lsibling_page->SetNextPageId(leaf_page->GetNextPageId());
+    int i = lsibling_page->GetSize();
+    lsibling_page->IncreaseSize(leaf_page->GetSize());
+    for (int j = 0; j < leaf_page->GetSize(); i++, j++) {
+      lsibling_page->SetAt(i, leaf_page->KeyAt(j), leaf_page->ValueAt(j));
+    }
+    leaf_guard.Drop();
+    for (int i = orign_slot_in_parent + 1; i < parent_page->GetSize(); i++) {
+      parent_page->SetKeyAt(i - 1, parent_page->KeyAt(i));
+      parent_page->SetValueAt(i - 1, parent_page->ValueAt(i));
+    }
+    parent_page->IncreaseSize(-1);
+  } else {
+    // 左右兄弟都有，需要判别
+    lsibling_guard = bpm_->FetchPageWrite(parent_page->ValueAt(orign_slot_in_parent - 1));
+    rsibling_guard = bpm_->FetchPageWrite(parent_page->ValueAt(orign_slot_in_parent + 1));
+    auto lsibling_page = lsibling_guard.template AsMut<LeafPage>();
+    auto rsibling_page = rsibling_guard.template AsMut<LeafPage>();
+    if (rsibling_page->GetSize() > rsibling_page->GetMinSize()) {
+      // 向右兄弟借
+      leaf_page->IncreaseSize(1);
+      leaf_page->SetAt(leaf_page->GetSize() - 1, rsibling_page->KeyAt(0), rsibling_page->ValueAt(0));
+      parent_page->SetKeyAt(orign_slot_in_parent + 1, rsibling_page->KeyAt(1));
+      for (int i = 1; i < rsibling_page->GetSize(); i++) {
+        rsibling_page->SetAt(i - 1, rsibling_page->KeyAt(i), rsibling_page->ValueAt(i));
+      }
+      rsibling_page->IncreaseSize(-1);
+      rwlatch_.WUnlock();
+      return;
+    }
+    if (lsibling_page->GetSize() > lsibling_page->GetMinSize()) {
+      // 向左兄弟借
+      leaf_page->IncreaseSize(1);
+      for (int i = leaf_page->GetSize() - 1; i >= 1; i--) {
+        leaf_page->SetAt(i, leaf_page->KeyAt(i - 1), leaf_page->ValueAt(i - 1));
+      }
+      leaf_page->SetAt(0, lsibling_page->KeyAt(lsibling_page->GetSize() - 1),
+                       lsibling_page->ValueAt(lsibling_page->GetSize() - 1));
+      parent_page->SetKeyAt(orign_slot_in_parent, lsibling_page->KeyAt(lsibling_page->GetSize() - 1));
+      lsibling_page->IncreaseSize(-1);
+      rwlatch_.WUnlock();
+      return;
+    }
+    // 与右兄弟合并
+    leaf_page->SetNextPageId(rsibling_page->GetNextPageId());
+    int i = leaf_page->GetSize();
+    leaf_page->IncreaseSize(rsibling_page->GetSize());
+    for (int j = 0; j < rsibling_page->GetSize(); i++, j++) {
+      leaf_page->SetAt(i, rsibling_page->KeyAt(j), rsibling_page->ValueAt(j));
+    }
+    rsibling_guard.Drop();  // 这个意思只是说buffer_pool里的这个page不再表达原来的物理page了,
+                            // 但真正的物理page依然有内容，是下面的索引脱钩才使得该有内容的page无效化了
+    for (int i = orign_slot_in_parent + 2; i < parent_page->GetSize(); i++) {
+      parent_page->SetKeyAt(i - 1, parent_page->KeyAt(i));
+      parent_page->SetValueAt(i - 1, parent_page->ValueAt(i));
+    }
+    parent_page->IncreaseSize(-1);
   }
-  sibling_guard.Drop();
-  for (int i=orign_slot_in_parent+2; i<parent_page->GetSize(); i++) {
-    parent_page->SetKeyAt(i-1, parent_page->KeyAt(i));
-    parent_page->SetValueAt(i-1, parent_page->ValueAt(i));
-  }
-  ctx.write_set_.push_back(std::move(parent_guard)); // 将修改后的parent结点返回；
+  ctx.write_set_.push_back(std::move(parent_guard));  // 将修改后的parent结点返回；
   // 需要进行迭代merge删除，并保留最顶层的parent结点
   while (ctx.write_set_.size() > 1) {  // 到这一步其实已经保证至少有两个结点在手了，
-                                        // 现在的目的是将头尾结点之间的所有结点都迭代推出处理掉
+                                       // 现在的目的是将头尾结点之间的所有结点都迭代推出处理掉
     WritePageGuard curr_guard = std::move(ctx.write_set_.back());
     ctx.write_set_.pop_back();
+    WritePageGuard parent_guard = std::move(ctx.write_set_.back());
+    ctx.write_set_.pop_back();
+    // 下面的代码基本和前面的差不多
+    auto curr_page = curr_guard.template AsMut<InternalPage>();
+    auto parent_page = parent_guard.template AsMut<InternalPage>();
+    int orign_slot_in_parent = -1;
+    for (int i = 1; i < parent_page->GetSize(); i++) {
+      if (comparator_(curr_page->KeyAt(1), parent_page->KeyAt(i)) < 0) {
+        orign_slot_in_parent = i - 1;
+        break;
+      }
+    }
+    WritePageGuard rsibling_guard;
+    WritePageGuard lsibling_guard;
+    if (orign_slot_in_parent == 0) {
+      // 没有左兄弟
+      rsibling_guard = bpm_->FetchPageWrite(parent_page->ValueAt(orign_slot_in_parent + 1));
+      auto rsibling_page = rsibling_guard.template AsMut<InternalPage>();
+      if (rsibling_page->GetSize() > rsibling_page->GetMinSize()) {
+        // 向右兄弟借
+        curr_page->IncreaseSize(1);
+        curr_page->SetKeyAt(curr_page->GetSize() - 1, parent_page->KeyAt(orign_slot_in_parent + 1));
+        curr_page->SetValueAt(curr_page->GetSize() - 1, rsibling_page->ValueAt(0));
+        parent_page->SetKeyAt(orign_slot_in_parent + 1, rsibling_page->KeyAt(1));
+        for (int i = 1; i < rsibling_page->GetSize(); i++) {
+          if (i != 1) {
+            rsibling_page->SetKeyAt(i - 1, rsibling_page->KeyAt(i));
+          }
+          rsibling_page->SetValueAt(i - 1, rsibling_page->ValueAt(i));
+        }
+        rsibling_page->IncreaseSize(-1);
+        rwlatch_.WUnlock();
+        return;
+      }
+      // 与右兄弟合并
+      int i = curr_page->GetSize();
+      curr_page->IncreaseSize(rsibling_page->GetSize());
+      curr_page->SetKeyAt(i, parent_page->KeyAt(orign_slot_in_parent + 1));
+      curr_page->SetValueAt(i, rsibling_page->ValueAt(0));
+      for (int j = 1; j < rsibling_page->GetSize(); i++, j++) {
+        curr_page->SetKeyAt(i + 1, rsibling_page->KeyAt(j));
+        curr_page->SetValueAt(i + 1, rsibling_page->ValueAt(j));
+      }
+      rsibling_guard.Drop();
+      for (int i = orign_slot_in_parent + 2; i < parent_page->GetSize(); i++) {
+        parent_page->SetKeyAt(i - 1, parent_page->KeyAt(i));
+        parent_page->SetValueAt(i - 1, parent_page->ValueAt(i));
+      }
+      parent_page->IncreaseSize(-1);
+    } else if (orign_slot_in_parent == -1) {
+      // 没有右兄弟
+      orign_slot_in_parent = parent_page->GetSize() - 1;
+      lsibling_guard = bpm_->FetchPageWrite(parent_page->ValueAt(orign_slot_in_parent - 1));
+      auto lsibling_page = lsibling_guard.template AsMut<InternalPage>();
+      if (lsibling_page->GetSize() > lsibling_page->GetMinSize()) {
+        // 向左兄弟借
+        curr_page->IncreaseSize(1);
+        for (int i = curr_page->GetSize() - 1; i >= 1; i--) {
+          if (i != 1) {
+            curr_page->SetKeyAt(i, curr_page->KeyAt(i - 1));
+          }
+          curr_page->SetValueAt(i, curr_page->ValueAt(i - 1));
+        }
+        curr_page->SetKeyAt(1, parent_page->KeyAt(orign_slot_in_parent));
+        curr_page->SetValueAt(0, lsibling_page->ValueAt(lsibling_page->GetSize() - 1));
+        parent_page->SetKeyAt(orign_slot_in_parent, lsibling_page->KeyAt(lsibling_page->GetSize() - 1));
+        lsibling_page->IncreaseSize(-1);
+        rwlatch_.WUnlock();
+        return;
+      }
+      // 与左兄弟合并
+      int i = lsibling_page->GetSize();
+      lsibling_page->IncreaseSize(curr_page->GetSize());
+      lsibling_page->SetKeyAt(i, parent_page->KeyAt(orign_slot_in_parent));
+      lsibling_page->SetValueAt(i, curr_page->ValueAt(0));
+      for (int j = 1; j < curr_page->GetSize(); i++, j++) {
+        lsibling_page->SetKeyAt(i + 1, curr_page->KeyAt(j));
+        lsibling_page->SetValueAt(i + 1, curr_page->ValueAt(j));
+      }
+      curr_guard.Drop();
+      for (int i = orign_slot_in_parent + 1; i < parent_page->GetSize(); i++) {
+        parent_page->SetKeyAt(i - 1, parent_page->KeyAt(i));
+        parent_page->SetValueAt(i - 1, parent_page->ValueAt(i));
+      }
+      parent_page->IncreaseSize(-1);
+    } else {
+      // 左右兄弟都有，需要判别
+      lsibling_guard = bpm_->FetchPageWrite(parent_page->ValueAt(orign_slot_in_parent - 1));
+      rsibling_guard = bpm_->FetchPageWrite(parent_page->ValueAt(orign_slot_in_parent + 1));
+      auto lsibling_page = lsibling_guard.template AsMut<InternalPage>();
+      auto rsibling_page = rsibling_guard.template AsMut<InternalPage>();
+      if (rsibling_page->GetSize() > rsibling_page->GetMinSize()) {
+        // 向右兄弟借
+        curr_page->IncreaseSize(1);
+        curr_page->SetKeyAt(curr_page->GetSize() - 1, parent_page->KeyAt(orign_slot_in_parent + 1));
+        curr_page->SetValueAt(curr_page->GetSize() - 1, rsibling_page->ValueAt(0));
+        parent_page->SetKeyAt(orign_slot_in_parent + 1, rsibling_page->KeyAt(1));
+        for (int i = 1; i < rsibling_page->GetSize(); i++) {
+          if (i != 1) {
+            rsibling_page->SetKeyAt(i - 1, rsibling_page->KeyAt(i));
+          }
+          rsibling_page->SetValueAt(i - 1, rsibling_page->ValueAt(i));
+        }
+        rsibling_page->IncreaseSize(-1);
+        rwlatch_.WUnlock();
+        return;
+      }
+      if (lsibling_page->GetSize() > lsibling_page->GetMinSize()) {
+        // 向左兄弟借
+        curr_page->IncreaseSize(1);
+        for (int i = curr_page->GetSize() - 1; i >= 1; i--) {
+          if (i != 1) {
+            curr_page->SetKeyAt(i, curr_page->KeyAt(i - 1));
+          }
+          curr_page->SetValueAt(i, curr_page->ValueAt(i - 1));
+        }
+        curr_page->SetKeyAt(1, parent_page->KeyAt(orign_slot_in_parent));
+        curr_page->SetValueAt(0, lsibling_page->ValueAt(lsibling_page->GetSize() - 1));
+        parent_page->SetKeyAt(orign_slot_in_parent, lsibling_page->KeyAt(lsibling_page->GetSize() - 1));
+        lsibling_page->IncreaseSize(-1);
+        rwlatch_.WUnlock();
+        return;
+      }
+      // 与右兄弟合并
+      int i = curr_page->GetSize();
+      curr_page->IncreaseSize(rsibling_page->GetSize());
+      curr_page->SetKeyAt(i, parent_page->KeyAt(orign_slot_in_parent + 1));
+      curr_page->SetValueAt(i, rsibling_page->ValueAt(0));
+      for (int j = 1; j < rsibling_page->GetSize(); i++, j++) {
+        curr_page->SetKeyAt(i + 1, rsibling_page->KeyAt(j));
+        curr_page->SetValueAt(i + 1, rsibling_page->ValueAt(j));
+      }
+      rsibling_guard.Drop();
+      for (int i = orign_slot_in_parent + 2; i < parent_page->GetSize(); i++) {
+        parent_page->SetKeyAt(i - 1, parent_page->KeyAt(i));
+        parent_page->SetValueAt(i - 1, parent_page->ValueAt(i));
+      }
+      parent_page->IncreaseSize(-1);
+    }
+    ctx.write_set_.push_back(std::move(parent_guard));
   }
-    // 如果需要根结点merge删除
-    // 如果不需要，那么最顶层的parent结点只需要做基本的删除即可，不需要merge
-      // 实际上不需要任何操作了；
+  WritePageGuard top_guard = std::move(ctx.write_set_.back());
+  ctx.write_set_.pop_back();
+  auto top_page = top_guard.template AsMut<InternalPage>();
+  if (top_guard.PageId() == GetRootPageId() && top_page->GetSize() == 1) {
+    // 之后如果需要根结点merge删除
+    WritePageGuard header_guard = bpm_->FetchPageWrite(header_page_id_);
+    auto header_page = header_guard.template AsMut<BPlusTreeHeaderPage>();
+    header_page->root_page_id_ = top_page->ValueAt(0);
+    top_guard.Drop();
+  }
+  rwlatch_.WUnlock();
+  // 如果不需要，那么最顶层的parent结点只需要做基本的删除即可，不需要merge
+  // 实际上不需要任何操作了；
 }
 
 /*****************************************************************************

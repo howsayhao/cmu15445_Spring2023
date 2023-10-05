@@ -42,7 +42,7 @@ auto B_PLUS_TREE_INTERNAL_PAGE_TYPE::KeyAt(int index) const -> KeyType {
     return key;
   }
   std::cout << "key at, out of internal range" << std::endl;
-  return {};
+  return array_[0].first;
 }
 
 INDEX_TEMPLATE_ARGUMENTS
@@ -76,7 +76,7 @@ auto B_PLUS_TREE_INTERNAL_PAGE_TYPE::ValueAt(int index) const -> ValueType {
     return array_[index].second;
   }
   std::cout << "value at, out of internal range" << std::endl;
-  return {};
+  return array_[0].second;
 }
 
 // valuetype for internalNode should be page id_t

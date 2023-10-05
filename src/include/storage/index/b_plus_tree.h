@@ -21,6 +21,7 @@
 
 #include "common/config.h"
 #include "common/macros.h"
+#include "common/rwlatch.h"
 #include "concurrency/transaction.h"
 #include "storage/index/index_iterator.h"
 #include "storage/page/b_plus_tree_header_page.h"
@@ -153,6 +154,8 @@ class BPlusTree {
   int leaf_max_size_;
   int internal_max_size_;
   page_id_t header_page_id_;
+
+  ReaderWriterLatch rwlatch_;
 };
 
 /**

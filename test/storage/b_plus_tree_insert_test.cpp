@@ -175,12 +175,12 @@ TEST(BPlusTreeTests, InsertTest3) {
 
   EXPECT_EQ(current_key, keys.size() + 1);
 
-  std::cout << "-------------------------a smooth line------------------------" << std::endl;
+  std::cout << "-------------------------a smooth line2------------------------" << std::endl;
 
   start_key = 3;
   current_key = start_key;
   index_key.SetFromInteger(start_key);
-  for (auto iterator = tree.Begin(index_key); iterator != tree.End(); ++iterator) {
+  for (auto iterator = tree.End(); iterator != tree.End(); ++iterator) {
     auto location = (*iterator).second;
     EXPECT_EQ(location.GetPageId(), 0);
     EXPECT_EQ(location.GetSlotNum(), current_key);
