@@ -9,6 +9,8 @@
 #include "storage/page/b_plus_tree_header_page.h"
 #include "storage/page/page_guard.h"
 
+#define ZHHAO_P2_DEBUG
+
 namespace bustub {
 
 INDEX_TEMPLATE_ARGUMENTS
@@ -33,9 +35,9 @@ BPLUSTREE_TYPE::BPlusTree(std::string name, page_id_t header_page_id, BufferPool
  */
 INDEX_TEMPLATE_ARGUMENTS
 auto BPLUSTREE_TYPE::IsEmpty() const -> bool {
-  // 我这里有点意识到为什么要专门搞一个header_page_id了，可以提高并发
-  WritePageGuard guard = bpm_->FetchPageWrite(header_page_id_);
-  auto root_header_page = guard.AsMut<BPlusTreeHeaderPage>();
+  // 我这里有点意识到为什么要专门搞一个header_page了，可以提高并发
+  ReadPageGuard guard = bpm_->FetchPageRead(header_page_id_);
+  auto root_header_page = guard.template As<BPlusTreeHeaderPage>();
   return root_header_page->root_page_id_ == INVALID_PAGE_ID;
 }
 /*****************************************************************************
@@ -96,8 +98,9 @@ auto BPLUSTREE_TYPE::GetValue(const KeyType &key, std::vector<ValueType> *result
  */
 INDEX_TEMPLATE_ARGUMENTS
 auto BPLUSTREE_TYPE::Insert(const KeyType &key, const ValueType &value, Transaction *txn) -> bool {
-  // Declaration of context instance.
+  // 锁控制
   rwlatch_.WLock();
+  // std::cout << "---insert---" << std::endl;
   Context ctx;
   ctx.write_set_.clear();
   // 处理root page为空的情况
@@ -118,7 +121,7 @@ auto BPLUSTREE_TYPE::Insert(const KeyType &key, const ValueType &value, Transact
   }
   // 找到叶子结点并存储必要路径
   ctx.root_page_id_ = GetRootPageId();
-  WritePageGuard guard = bpm_->FetchPageWrite(GetRootPageId());
+  WritePageGuard guard = bpm_->FetchPageWrite(ctx.root_page_id_);
   auto curr_page = guard.template As<InternalPage>();
   ctx.write_set_.push_back(std::move(guard));
   while (!curr_page->IsLeafPage()) {
@@ -150,8 +153,23 @@ auto BPLUSTREE_TYPE::Insert(const KeyType &key, const ValueType &value, Transact
   // auto leaf_page = ctx.write_set_.back().AsMut<LeafPage>();
   auto orign_page_id = leaf_guard.PageId();
   auto leaf_page = leaf_guard.template AsMut<LeafPage>();
-
   ctx.write_set_.pop_back();
+
+  // log write set
+  #ifdef ZHHAO_P2_DEBUG
+    auto log = std::stringstream();
+    // operation
+    log << "thread " << std::this_thread::get_id() << " | insert" << ": "
+        << key << " [page_id: " << leaf_guard.PageId()
+        << ", size: " << leaf_guard.As<BPlusTreePage>()->GetSize() << "/"
+        << leaf_guard.As<BPlusTreePage>()->GetMaxSize() << "]" << std::endl << "parent ids: ";
+    for (auto &page_guard : ctx.write_set_) {
+      log << page_guard.PageId() << " → ";
+    }
+    log << leaf_guard.PageId();
+    LOG_DEBUG("%s", log.str().c_str());
+  #endif
+
   for (int i = 0; i < leaf_page->GetSize(); i++) {  // 先判断duplicate_key
     if (comparator_(leaf_page->KeyAt(i), key) == 0) {
       rwlatch_.WUnlock();
@@ -219,7 +237,7 @@ auto BPLUSTREE_TYPE::Insert(const KeyType &key, const ValueType &value, Transact
   // 不断迭代上推，直到只剩最后一个non-split parent，如果没有non-split parent那么全部推出
   // 这一过程的行为和处理叶子的相似但不一样，所以不能合用代码
   page_id_t new_split_page_id;
-  bool to_split_root = !ctx.write_set_.empty() && ctx.write_set_.front().PageId() == GetRootPageId() &&
+  bool to_split_root = !ctx.write_set_.empty() && ctx.write_set_.front().PageId() == ctx.root_page_id_ &&
                        ctx.write_set_.front().template AsMut<InternalPage>()->GetSize() ==
                            ctx.write_set_.front().template AsMut<InternalPage>()->GetMaxSize();
   while (ctx.write_set_.size() > 1 || (to_split_root && !ctx.write_set_.empty())) {
@@ -344,6 +362,7 @@ INDEX_TEMPLATE_ARGUMENTS
 void BPLUSTREE_TYPE::Remove(const KeyType &key, Transaction *txn) {
   // 锁控制，目前为一把大锁
   rwlatch_.WLock();
+  // std::cout << "---remove---" << std::endl;
   Context ctx;
   ctx.write_set_.clear();
   if (IsEmpty()) {
@@ -378,6 +397,8 @@ void BPLUSTREE_TYPE::Remove(const KeyType &key, Transaction *txn) {
   auto leaf_guard = std::move(ctx.write_set_.back());
   auto leaf_page = leaf_guard.template AsMut<LeafPage>();
   ctx.write_set_.pop_back();
+  KeyType key_for_locate = leaf_page->KeyAt(0);  // 该变量仅为处理后续parent_page无key可用的情况
+                                                 // 需注意无论该key是否会被删除,都可用于表征其parent的位置
   int delete_slot = -1;
   // 如果树非空，但找不到对应结点key，直接返回；树为空的情况前面已经处理掉了；
   for (int i = 0; i < leaf_page->GetSize(); i++) {
@@ -547,12 +568,18 @@ void BPLUSTREE_TYPE::Remove(const KeyType &key, Transaction *txn) {
     auto curr_page = curr_guard.template AsMut<InternalPage>();
     auto parent_page = parent_guard.template AsMut<InternalPage>();
     int orign_slot_in_parent = -1;
+    if (curr_page->GetSize() != 1) {
+      key_for_locate = curr_page->KeyAt(1);
+    }
     for (int i = 1; i < parent_page->GetSize(); i++) {
-      if (comparator_(curr_page->KeyAt(1), parent_page->KeyAt(i)) < 0) {
+      if (comparator_(key_for_locate, parent_page->KeyAt(i)) < 0) {
+        // 此处有问题，curr_page可能已经没有可用的key了，此时无法定位在其parent的位置
+        // 需要对该临界情况做讨论，并处理此时的定位问题，故对此处做了修改
         orign_slot_in_parent = i - 1;
         break;
       }
     }
+    key_for_locate = parent_page->KeyAt(1);  // 更新新的key_for_locate，此时parent还未减小；
     WritePageGuard rsibling_guard;
     WritePageGuard lsibling_guard;
     if (orign_slot_in_parent == 0) {
@@ -708,8 +735,10 @@ void BPLUSTREE_TYPE::Remove(const KeyType &key, Transaction *txn) {
 INDEX_TEMPLATE_ARGUMENTS
 auto BPLUSTREE_TYPE::Begin() -> INDEXITERATOR_TYPE {
   // 找到最左边叶子结点的page_id
+  rwlatch_.RLock();
   if (IsEmpty()) {
     INDEXITERATOR_TYPE iterator(comparator_);
+    rwlatch_.RUnlock();
     return iterator;
   }
   ReadPageGuard guard = bpm_->FetchPageRead(GetRootPageId());
@@ -727,6 +756,7 @@ auto BPLUSTREE_TYPE::Begin() -> INDEXITERATOR_TYPE {
   MappingType curr_map = {curr_key, curr_val};
   INDEXITERATOR_TYPE iterator("first_iterator", bpm_, comparator_, curr_page_id, curr_slot, curr_key, curr_val,
                               curr_map, leaf_max_size_, internal_max_size_);
+  rwlatch_.RUnlock();
   return iterator;
 }
 
@@ -737,12 +767,14 @@ auto BPLUSTREE_TYPE::Begin() -> INDEXITERATOR_TYPE {
  */
 INDEX_TEMPLATE_ARGUMENTS
 auto BPLUSTREE_TYPE::Begin(const KeyType &key) -> INDEXITERATOR_TYPE {
+  rwlatch_.RLock();
   auto iterator = Begin();
   for (; iterator != End(); ++iterator) {
     if (comparator_((*iterator).first, key) == 0) {
       break;
     }
   }
+  rwlatch_.RUnlock();
   return iterator;
 }
 
@@ -753,8 +785,10 @@ auto BPLUSTREE_TYPE::Begin(const KeyType &key) -> INDEXITERATOR_TYPE {
  */
 INDEX_TEMPLATE_ARGUMENTS
 auto BPLUSTREE_TYPE::End() -> INDEXITERATOR_TYPE {
+  rwlatch_.RLock();
   auto iterator = Begin();
   iterator.SetEnd();
+  rwlatch_.RUnlock();
   return iterator;
 }
 
@@ -763,8 +797,8 @@ auto BPLUSTREE_TYPE::End() -> INDEXITERATOR_TYPE {
  */
 INDEX_TEMPLATE_ARGUMENTS
 auto BPLUSTREE_TYPE::GetRootPageId() -> page_id_t {
-  WritePageGuard guard = bpm_->FetchPageWrite(header_page_id_);
-  auto root_header_page = guard.template AsMut<BPlusTreeHeaderPage>();
+  ReadPageGuard guard = bpm_->FetchPageRead(header_page_id_);
+  auto root_header_page = guard.template As<BPlusTreeHeaderPage>();
   return root_header_page->root_page_id_;
 }
 

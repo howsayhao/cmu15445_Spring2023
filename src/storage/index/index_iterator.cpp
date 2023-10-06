@@ -50,7 +50,7 @@ auto INDEXITERATOR_TYPE::operator*() -> const MappingType & {
 INDEX_TEMPLATE_ARGUMENTS
 auto INDEXITERATOR_TYPE::operator++() -> INDEXITERATOR_TYPE & {
   if (IsEnd()) {
-    std::cout << "end tail of iterator" << std::endl;
+    // std::cout << "end tail of iterator" << std::endl;
     return *this;
   }
   ReadPageGuard guard = bpm_->FetchPageRead(curr_page_id_);
@@ -64,7 +64,7 @@ auto INDEXITERATOR_TYPE::operator++() -> INDEXITERATOR_TYPE & {
   if (curr_slot_ == leaf_page->GetSize() - 1) {  // 需要更新新的page
     next_page_id = leaf_page->GetNextPageId();
     if (next_page_id == INVALID_PAGE_ID) {  // 到达终点了
-      std::cout << "++operator tail end" << std::endl;
+      // std::cout << "++operator tail end" << std::endl;
       this->SetEnd();
       return *this;
     }

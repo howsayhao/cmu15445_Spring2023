@@ -49,7 +49,7 @@ TEST(BPlusTreeTests, ScaleTest) {  // NOLINT
   (void)header_page;
 
   // create b+ tree
-  BPlusTree<GenericKey<8>, RID, GenericComparator<8>> tree("foo_pk", page_id, bpm, comparator, 5, 5);
+  BPlusTree<GenericKey<8>, RID, GenericComparator<8>> tree("foo_pk", page_id, bpm, comparator, 3, 3);
   GenericKey<8> index_key;
   RID rid;
   // create transaction
@@ -111,25 +111,25 @@ TEST(BPlusTreeTests, ScaleTest) {  // NOLINT
   //   }
   // }
 
-  // std::cout << "---查找smooth line---" << std::endl;
-  // // 查找
-  // {
-  //   for (auto key : keys) {
-  //     rids.clear();
-  //     index_key.SetFromInteger(key);
-  //     // tree.GetValue(index_key, &rids);
-  //     std::cout << key << std::endl;
-  //     // 检查删除功能是否正常
-  //     bool is_present = tree.GetValue(index_key, &rids);
-  //     if (!is_present) {
-  //       ASSERT_NE(std::find(remove_keys.begin(), remove_keys.end(), key), remove_keys.end());
-  //     } else {
-  //       ASSERT_EQ(rids.size(), 1);
-  //       int64_t value = key & 0xFFFFFFFF;
-  //       ASSERT_EQ(rids[0].GetSlotNum(), value);
-  //     }
-  //   }
-  // }
+  std::cout << "---查找smooth line---" << std::endl;
+  // 查找
+  {
+    for (auto key : keys) {
+      rids.clear();
+      index_key.SetFromInteger(key);
+      // tree.GetValue(index_key, &rids);
+      std::cout << key << std::endl;
+      // 检查删除功能是否正常
+      bool is_present = tree.GetValue(index_key, &rids);
+      if (!is_present) {
+        ASSERT_NE(std::find(remove_keys.begin(), remove_keys.end(), key), remove_keys.end());
+      } else {
+        ASSERT_EQ(rids.size(), 1);
+        int64_t value = key & 0xFFFFFFFF;
+        ASSERT_EQ(rids[0].GetSlotNum(), value);
+      }
+    }
+  }
 
   std::cout << "---迭代查找smooth line---" << std::endl;
   // 迭代器查找

@@ -43,7 +43,7 @@ class IndexIterator {
 
   auto operator==(const IndexIterator &itr) const -> bool {
     if (this->IsEnd() || itr.IsEnd()) {
-      std::cout << "operator==" << this->IsEnd() << " " << itr.IsEnd() << std::endl;
+      // std::cout << "operator==" << this->IsEnd() << " " << itr.IsEnd() << std::endl;
       return itr.IsEnd() && this->IsEnd();
     }
     return curr_page_id_ == itr.curr_page_id_ && curr_slot_ == itr.curr_slot_;
