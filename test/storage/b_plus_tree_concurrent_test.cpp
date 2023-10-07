@@ -183,11 +183,12 @@ TEST(BPlusTreeConcurrentTest, InsertTest2) {
   BPlusTree<GenericKey<8>, RID, GenericComparator<8>> tree("foo_pk", header_page->GetPageId(), bpm, comparator, 3, 3);
   // keys to Insert
   std::vector<int64_t> keys;
-  int64_t scale_factor = 10000;
+  int64_t scale_factor;
+  std::cin >> scale_factor;
   for (int64_t key = 1; key < scale_factor; key++) {
     keys.push_back(key);
   }
-  LaunchParallelTest(20, InsertHelperSplit, &tree, keys, 20);
+  LaunchParallelTest(200, InsertHelperSplit, &tree, keys, 200);
 
   std::vector<RID> rids;
   GenericKey<8> index_key;
