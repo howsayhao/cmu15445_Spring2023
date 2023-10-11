@@ -11,8 +11,10 @@
 //===----------------------------------------------------------------------===//
 
 #include <chrono>  // NOLINT
+#include <cstdint>
 #include <cstdio>
 #include <functional>
+#include <random>
 #include <thread>  // NOLINT
 
 #include "buffer/buffer_pool_manager.h"
@@ -180,15 +182,26 @@ TEST(BPlusTreeConcurrentTest, InsertTest2) {
   page_id_t page_id;
   auto header_page = bpm->NewPage(&page_id);
   // create b+ tree
-  BPlusTree<GenericKey<8>, RID, GenericComparator<8>> tree("foo_pk", header_page->GetPageId(), bpm, comparator, 3, 3);
+  std::cout << "leaf and internal max size :" << std::endl;
+  int64_t leaf_size;
+  int64_t internal_size;
+  std::cin >> leaf_size;
+  std::cin >> internal_size;
+  BPlusTree<GenericKey<8>, RID, GenericComparator<8>> tree("foo_pk", header_page->GetPageId(), bpm, comparator,
+                                                           leaf_size, internal_size);
   // keys to Insert
+  std::cout << "key size and thread nums:" << std::endl;
   std::vector<int64_t> keys;
   int64_t scale_factor;
   std::cin >> scale_factor;
   for (int64_t key = 1; key < scale_factor; key++) {
     keys.push_back(key);
   }
-  LaunchParallelTest(200, InsertHelperSplit, &tree, keys, 200);
+  auto rng = std::default_random_engine{};
+  std::shuffle(keys.begin(), keys.end(), rng);
+  int64_t thread_nums;
+  std::cin >> thread_nums;
+  LaunchParallelTest(thread_nums, InsertHelperSplit, &tree, keys, thread_nums);
 
   std::vector<RID> rids;
   GenericKey<8> index_key;

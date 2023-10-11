@@ -51,14 +51,17 @@ auto BPLUSTREE_TYPE::IsEmpty() const -> bool {
 INDEX_TEMPLATE_ARGUMENTS
 auto BPLUSTREE_TYPE::GetValue(const KeyType &key, std::vector<ValueType> *result, Transaction *txn) -> bool {
   // 找到叶子结点，如果没有则返回false
-  // rwlatch_.RLock();
+  rwlatch_.RLock();
+
 #ifdef ZHHAO_P2_DEBUG
   auto log = std::stringstream();
-  log << "---get---" << key << " | thread " << std::this_thread::get_id() << std::endl;
+  log << "---get---" << key << " | thread " << std::this_thread::get_id() << " | leaf size:" << leaf_max_size_
+      << " | internal size:" << internal_max_size_ << std::endl;
   LOG_DEBUG("%s", log.str().c_str());
 #endif
   ReadPageGuard head_guard = bpm_->FetchPageRead(header_page_id_);
   if (head_guard.template As<BPlusTreeHeaderPage>()->root_page_id_ == INVALID_PAGE_ID) {
+    rwlatch_.RUnlock();
     return false;
   }
   ReadPageGuard guard = bpm_->FetchPageRead(head_guard.As<BPlusTreeHeaderPage>()->root_page_id_);
@@ -82,12 +85,16 @@ auto BPLUSTREE_TYPE::GetValue(const KeyType &key, std::vector<ValueType> *result
   for (int i = 0; i < leaf_page->GetSize(); i++) {
     if (comparator_(key, leaf_page->KeyAt(i)) == 0) {
       (*result).push_back(leaf_page->ValueAt(i));
-      // rwlatch_.RUnlock();
+      rwlatch_.RUnlock();
       return true;
     }
   }
-  std::cout << "not found" << std::endl;
-  // rwlatch_.RUnlock();
+#ifdef ZHHAO_P2_DEBUG
+  log = std::stringstream();
+  log << "---get can not found---" << key << " | thread " << std::this_thread::get_id() << std::endl;
+  LOG_DEBUG("%s", log.str().c_str());
+#endif
+  rwlatch_.RUnlock();
   return false;
 }
 
@@ -108,9 +115,10 @@ auto BPLUSTREE_TYPE::Insert(const KeyType &key, const ValueType &value, Transact
   log << "---insert---" << key << " | thread " << std::this_thread::get_id() << std::endl;
   LOG_DEBUG("%s", log.str().c_str());
 #endif
+  rwlatch_.WLock();
+
   Context ctx;
   ctx.write_set_.clear();
-  // 处理root page为空的情况
 
   WritePageGuard head_guard = bpm_->FetchPageWrite(header_page_id_);
 #ifdef ZHHAO_P2_DEBUG
@@ -118,9 +126,8 @@ auto BPLUSTREE_TYPE::Insert(const KeyType &key, const ValueType &value, Transact
   log << "---insert get header---" << key << " | thread " << std::this_thread::get_id() << std::endl;
   LOG_DEBUG("%s", log.str().c_str());
 #endif
+  // 处理root page为空的情况
   if (head_guard.AsMut<BPlusTreeHeaderPage>()->root_page_id_ == INVALID_PAGE_ID) {
-    // std::cout << key << std::endl;
-    // rwlatch_.WLock();
     auto root_header_page = head_guard.template AsMut<BPlusTreeHeaderPage>();
     page_id_t root_page_id;
     bpm_->NewPageGuarded(&root_page_id);
@@ -133,23 +140,20 @@ auto BPLUSTREE_TYPE::Insert(const KeyType &key, const ValueType &value, Transact
     root_page->SetAt(0, key, value);
 #ifdef ZHHAO_P2_DEBUG
     log = std::stringstream();
-    log << "---insert out---" << key << " | thread " << std::this_thread::get_id() << std::endl;
+    log << "---insert out, empty---" << key << " | thread " << std::this_thread::get_id() << std::endl;
     LOG_DEBUG("%s", log.str().c_str());
 #endif
-    // rwlatch_.WUnlock();
+    rwlatch_.WUnlock();
     return true;
   }
   // 找到叶子结点并存储必要路径
-  // ctx.root_page_id_ = GetRootPageId();
-  // rwlatch_.WUnlock();
   // 这回不对根结点进行区分了，所有结点都有父亲结点了
   // WritePageGuard head_guard = bpm_->FetchPageWrite(header_page_id_);
   WritePageGuard guard = bpm_->FetchPageWrite(head_guard.AsMut<BPlusTreeHeaderPage>()->root_page_id_);
 
-  // std::cout << "thread reach" << std::endl;
   /* 这里前面都是一些局部变量，后面因为page的天然属性可以实现线程隔离 */
   ctx.write_set_.push_back(std::move(head_guard));
-  auto curr_page = guard.template As<InternalPage>();
+  auto curr_page = guard.template AsMut<InternalPage>();
   if (curr_page->GetSize() < curr_page->GetMaxSize()) {
     // 将根结点与其他结点统一起来
     ctx.write_set_.front().Drop();
@@ -167,7 +171,7 @@ auto BPLUSTREE_TYPE::Insert(const KeyType &key, const ValueType &value, Transact
         guard = bpm_->FetchPageWrite(curr_page->ValueAt(i));
       }
     }
-    curr_page = guard.template As<InternalPage>();
+    curr_page = guard.template AsMut<InternalPage>();
     if (curr_page->GetSize() < curr_page->GetMaxSize()) {
       for (auto &page_guard : ctx.write_set_) {
         page_guard.Drop();  // 不清楚，看起来确实需要手动释放
@@ -177,7 +181,6 @@ auto BPLUSTREE_TYPE::Insert(const KeyType &key, const ValueType &value, Transact
     ctx.write_set_.push_back(std::move(guard));
   }
   // 进行insert操作，首先处理两个小case
-  // std::cout << "step1" << std::endl;
   auto leaf_guard =
       std::move(ctx.write_set_.back());  // 下面两行注释掉的是有问题的
                                          // 因为leaf_page仅仅是保存了这个page在mem的地址
@@ -187,13 +190,10 @@ auto BPLUSTREE_TYPE::Insert(const KeyType &key, const ValueType &value, Transact
                                          // 另外吐槽一下，check-lint竟然不允许/**/，是我操作不对吗？
   // auto orign_page_id = ctx.write_set_.back().PageId();
   // auto leaf_page = ctx.write_set_.back().AsMut<LeafPage>();
-  // std::cout << "step2" << std::endl;
   auto orign_page_id = leaf_guard.PageId();
   auto leaf_page = leaf_guard.template AsMut<LeafPage>();
   ctx.write_set_.pop_back();
-  // std::cout << "step3" << std::endl;
 
-// log write set
 #ifdef ZHHAO_P2_DEBUG
   log = std::stringstream();
   log << "thread " << std::this_thread::get_id() << " | insert"
@@ -206,16 +206,15 @@ auto BPLUSTREE_TYPE::Insert(const KeyType &key, const ValueType &value, Transact
   log << leaf_guard.PageId();
   LOG_DEBUG("%s", log.str().c_str());
 #endif
-  // std::cout << "step4" << std::endl;
 
   for (int i = 0; i < leaf_page->GetSize(); i++) {  // 先判断duplicate_key
     if (comparator_(leaf_page->KeyAt(i), key) == 0) {
-// rwlatch_.WUnlock();
-    #ifdef ZHHAO_P2_DEBUG
-          log = std::stringstream();
-          log << "---insert out---" << key << " | thread " << std::this_thread::get_id() << std::endl;
-          LOG_DEBUG("%s", log.str().c_str());
-    #endif
+#ifdef ZHHAO_P2_DEBUG
+      log = std::stringstream();
+      log << "---insert out,duplicate---" << key << " | thread " << std::this_thread::get_id() << std::endl;
+      LOG_DEBUG("%s", log.str().c_str());
+#endif
+      rwlatch_.WUnlock();
       return false;
     }
   }
@@ -235,12 +234,12 @@ auto BPLUSTREE_TYPE::Insert(const KeyType &key, const ValueType &value, Transact
     }
     leaf_page->IncreaseSize(1);
     leaf_page->SetAt(leaf_page->GetSize() - 1, ins.first, ins.second);
-// rwlatch_.WUnlock();
-    #ifdef ZHHAO_P2_DEBUG
-        log = std::stringstream();
-        log << "---insert out---" << key << " | thread " << std::this_thread::get_id() << std::endl;
-        LOG_DEBUG("%s", log.str().c_str());
-    #endif
+#ifdef ZHHAO_P2_DEBUG
+    log = std::stringstream();
+    log << "---insert out,no split leaf---" << key << " | thread " << std::this_thread::get_id() << std::endl;
+    LOG_DEBUG("%s", log.str().c_str());
+#endif
+    rwlatch_.WUnlock();
     return true;
   }
   // 处理一般性的insert
@@ -350,16 +349,14 @@ auto BPLUSTREE_TYPE::Insert(const KeyType &key, const ValueType &value, Transact
     parent_guard.Drop();
     split_guard.Drop();
   }
-  // std::cout << "down here" << std::endl;
   // 没有non-split parent，意味着需要重建root
   if (ctx.write_set_.front().PageId() == header_page_id_) {
-    #ifdef ZHHAO_P2_DEBUG
-        log = std::stringstream();
-        log << "---need to rebuild root---" << key << " | thread " << std::this_thread::get_id() << std::endl;
-        LOG_DEBUG("%s", log.str().c_str());
-    #endif
+#ifdef ZHHAO_P2_DEBUG
+    log = std::stringstream();
+    log << "---need to rebuild root---" << key << " | thread " << std::this_thread::get_id() << std::endl;
+    LOG_DEBUG("%s", log.str().c_str());
+#endif
     // rwlatch_.WLock();
-    // std::cout << "--" << std::endl;
     auto root_header_page = ctx.write_set_.front().template AsMut<BPlusTreeHeaderPage>();
     page_id_t root_page_id;
     bpm_->NewPageGuarded(&root_page_id);
@@ -372,12 +369,12 @@ auto BPLUSTREE_TYPE::Insert(const KeyType &key, const ValueType &value, Transact
     root_page->SetKeyAt(1, split_key);
     root_page->SetValueAt(1, split_page_id);
     root_page->SetValueAt(0, orign_page_id);
-// rwlatch_.WUnlock();
-    #ifdef ZHHAO_P2_DEBUG
-        log = std::stringstream();
-        log << "---insert out---" << key << " | thread " << std::this_thread::get_id() << std::endl;
-        LOG_DEBUG("%s", log.str().c_str());
-    #endif
+#ifdef ZHHAO_P2_DEBUG
+    log = std::stringstream();
+    log << "---insert out,root rebuilt---" << key << " | thread " << std::this_thread::get_id() << std::endl;
+    LOG_DEBUG("%s", log.str().c_str());
+#endif
+    rwlatch_.WUnlock();
     return true;
   }
 
@@ -406,12 +403,12 @@ auto BPLUSTREE_TYPE::Insert(const KeyType &key, const ValueType &value, Transact
   parent_page->IncreaseSize(1);
   parent_page->SetKeyAt(parent_page->GetSize() - 1, kins);
   parent_page->SetValueAt(parent_page->GetSize() - 1, pins);
-// rwlatch_.WUnlock();
-  #ifdef ZHHAO_P2_DEBUG
-    log = std::stringstream();
-    log << "---insert out---" << key << " | thread " << std::this_thread::get_id() << std::endl;
-    LOG_DEBUG("%s", log.str().c_str());
-  #endif
+#ifdef ZHHAO_P2_DEBUG
+  log = std::stringstream();
+  log << "---insert out,top no split---" << key << " | thread " << std::this_thread::get_id() << std::endl;
+  LOG_DEBUG("%s", log.str().c_str());
+#endif
+  rwlatch_.WUnlock();
   return true;
 }
 
@@ -429,11 +426,11 @@ INDEX_TEMPLATE_ARGUMENTS
 void BPLUSTREE_TYPE::Remove(const KeyType &key, Transaction *txn) {
   // 锁控制，目前为一把大锁
   rwlatch_.WLock();
-  #ifdef ZHHAO_P2_DEBUG
-    auto log = std::stringstream();
-    log << "---remove---" << key << " | thread " << std::this_thread::get_id() << std::endl;
-    LOG_DEBUG("%s", log.str().c_str());
-  #endif
+#ifdef ZHHAO_P2_DEBUG
+  auto log = std::stringstream();
+  log << "---remove---" << key << " | thread " << std::this_thread::get_id() << std::endl;
+  LOG_DEBUG("%s", log.str().c_str());
+#endif
   Context ctx;
   ctx.write_set_.clear();
   if (IsEmpty()) {
