@@ -23,7 +23,7 @@
 #include "storage/index/b_plus_tree.h"
 #include "test_util.h"  // NOLINT
 
-// #define INSERT_TEST
+#define INSERT_TEST
 // #define REMOVE_TEST
 #define GET_TEST
 
