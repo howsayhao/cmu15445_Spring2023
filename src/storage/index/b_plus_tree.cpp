@@ -9,7 +9,8 @@
 #include "storage/page/b_plus_tree_header_page.h"
 #include "storage/page/page_guard.h"
 
-#define ZHHAO_P2_DEBUG
+#define ZHHAO_P2_INSERT_DEBUG
+#define ZHHAO_P2_REMOVE_DEBUG
 
 namespace bustub {
 
@@ -53,7 +54,7 @@ auto BPLUSTREE_TYPE::GetValue(const KeyType &key, std::vector<ValueType> *result
   // 找到叶子结点，如果没有则返回false
   rwlatch_.RLock();
 
-#ifdef ZHHAO_P2_DEBUG
+#ifdef ZHHAO_P2_INSERT_DEBUG
   auto log = std::stringstream();
   log << "---get---" << key << " | thread " << std::this_thread::get_id() << " | leaf size:" << leaf_max_size_
       << " | internal size:" << internal_max_size_ << std::endl;
@@ -89,7 +90,7 @@ auto BPLUSTREE_TYPE::GetValue(const KeyType &key, std::vector<ValueType> *result
       return true;
     }
   }
-#ifdef ZHHAO_P2_DEBUG
+#ifdef ZHHAO_P2_INSERT_DEBUG
   log = std::stringstream();
   log << "---get can not found---" << key << " | thread " << std::this_thread::get_id() << std::endl;
   LOG_DEBUG("%s", log.str().c_str());
@@ -110,18 +111,17 @@ auto BPLUSTREE_TYPE::GetValue(const KeyType &key, std::vector<ValueType> *result
  */
 INDEX_TEMPLATE_ARGUMENTS
 auto BPLUSTREE_TYPE::Insert(const KeyType &key, const ValueType &value, Transaction *txn) -> bool {
-#ifdef ZHHAO_P2_DEBUG
+#ifdef ZHHAO_P2_INSERT_DEBUG
   auto log = std::stringstream();
   log << "---insert---" << key << " | thread " << std::this_thread::get_id() << std::endl;
   LOG_DEBUG("%s", log.str().c_str());
 #endif
-  rwlatch_.WLock();
 
   Context ctx;
   ctx.write_set_.clear();
 
   WritePageGuard head_guard = bpm_->FetchPageWrite(header_page_id_);
-#ifdef ZHHAO_P2_DEBUG
+#ifdef ZHHAO_P2_INSERT_DEBUG
   log = std::stringstream();
   log << "---insert get header---" << key << " | thread " << std::this_thread::get_id() << std::endl;
   LOG_DEBUG("%s", log.str().c_str());
@@ -138,12 +138,11 @@ auto BPLUSTREE_TYPE::Insert(const KeyType &key, const ValueType &value, Transact
     root_page->SetMaxSize(leaf_max_size_);
     root_page->IncreaseSize(1);
     root_page->SetAt(0, key, value);
-#ifdef ZHHAO_P2_DEBUG
+#ifdef ZHHAO_P2_INSERT_DEBUG
     log = std::stringstream();
     log << "---insert out, empty---" << key << " | thread " << std::this_thread::get_id() << std::endl;
     LOG_DEBUG("%s", log.str().c_str());
 #endif
-    rwlatch_.WUnlock();
     return true;
   }
   // 找到叶子结点并存储必要路径
@@ -156,7 +155,7 @@ auto BPLUSTREE_TYPE::Insert(const KeyType &key, const ValueType &value, Transact
   auto curr_page = guard.template AsMut<InternalPage>();
   if (curr_page->GetSize() < curr_page->GetMaxSize()) {
     // 将根结点与其他结点统一起来
-    ctx.write_set_.front().Drop();
+    // ctx.write_set_.front().Drop();
     ctx.write_set_.clear();
   }
   ctx.write_set_.push_back(std::move(guard));
@@ -173,9 +172,9 @@ auto BPLUSTREE_TYPE::Insert(const KeyType &key, const ValueType &value, Transact
     }
     curr_page = guard.template AsMut<InternalPage>();
     if (curr_page->GetSize() < curr_page->GetMaxSize()) {
-      for (auto &page_guard : ctx.write_set_) {
-        page_guard.Drop();  // 不清楚，看起来确实需要手动释放
-      }
+      // for (auto &page_guard : ctx.write_set_) {
+      //   page_guard.Drop();  // 不清楚，看起来确实需要手动释放
+      // }
       ctx.write_set_.clear();
     }
     ctx.write_set_.push_back(std::move(guard));
@@ -194,7 +193,7 @@ auto BPLUSTREE_TYPE::Insert(const KeyType &key, const ValueType &value, Transact
   auto leaf_page = leaf_guard.template AsMut<LeafPage>();
   ctx.write_set_.pop_back();
 
-#ifdef ZHHAO_P2_DEBUG
+#ifdef ZHHAO_P2_INSERT_DEBUG
   log = std::stringstream();
   log << "thread " << std::this_thread::get_id() << " | insert"
       << ": " << key << " [page_id: " << leaf_guard.PageId() << ", size: " << leaf_guard.As<BPlusTreePage>()->GetSize()
@@ -209,12 +208,11 @@ auto BPLUSTREE_TYPE::Insert(const KeyType &key, const ValueType &value, Transact
 
   for (int i = 0; i < leaf_page->GetSize(); i++) {  // 先判断duplicate_key
     if (comparator_(leaf_page->KeyAt(i), key) == 0) {
-#ifdef ZHHAO_P2_DEBUG
+#ifdef ZHHAO_P2_INSERT_DEBUG
       log = std::stringstream();
       log << "---insert out,duplicate---" << key << " | thread " << std::this_thread::get_id() << std::endl;
       LOG_DEBUG("%s", log.str().c_str());
 #endif
-      rwlatch_.WUnlock();
       return false;
     }
   }
@@ -234,12 +232,11 @@ auto BPLUSTREE_TYPE::Insert(const KeyType &key, const ValueType &value, Transact
     }
     leaf_page->IncreaseSize(1);
     leaf_page->SetAt(leaf_page->GetSize() - 1, ins.first, ins.second);
-#ifdef ZHHAO_P2_DEBUG
+#ifdef ZHHAO_P2_INSERT_DEBUG
     log = std::stringstream();
     log << "---insert out,no split leaf---" << key << " | thread " << std::this_thread::get_id() << std::endl;
     LOG_DEBUG("%s", log.str().c_str());
 #endif
-    rwlatch_.WUnlock();
     return true;
   }
   // 处理一般性的insert
@@ -351,12 +348,11 @@ auto BPLUSTREE_TYPE::Insert(const KeyType &key, const ValueType &value, Transact
   }
   // 没有non-split parent，意味着需要重建root
   if (ctx.write_set_.front().PageId() == header_page_id_) {
-#ifdef ZHHAO_P2_DEBUG
+#ifdef ZHHAO_P2_INSERT_DEBUG
     log = std::stringstream();
     log << "---need to rebuild root---" << key << " | thread " << std::this_thread::get_id() << std::endl;
     LOG_DEBUG("%s", log.str().c_str());
 #endif
-    // rwlatch_.WLock();
     auto root_header_page = ctx.write_set_.front().template AsMut<BPlusTreeHeaderPage>();
     page_id_t root_page_id;
     bpm_->NewPageGuarded(&root_page_id);
@@ -369,12 +365,11 @@ auto BPLUSTREE_TYPE::Insert(const KeyType &key, const ValueType &value, Transact
     root_page->SetKeyAt(1, split_key);
     root_page->SetValueAt(1, split_page_id);
     root_page->SetValueAt(0, orign_page_id);
-#ifdef ZHHAO_P2_DEBUG
+#ifdef ZHHAO_P2_INSERT_DEBUG
     log = std::stringstream();
     log << "---insert out,root rebuilt---" << key << " | thread " << std::this_thread::get_id() << std::endl;
     LOG_DEBUG("%s", log.str().c_str());
 #endif
-    rwlatch_.WUnlock();
     return true;
   }
 
@@ -403,12 +398,11 @@ auto BPLUSTREE_TYPE::Insert(const KeyType &key, const ValueType &value, Transact
   parent_page->IncreaseSize(1);
   parent_page->SetKeyAt(parent_page->GetSize() - 1, kins);
   parent_page->SetValueAt(parent_page->GetSize() - 1, pins);
-#ifdef ZHHAO_P2_DEBUG
+#ifdef ZHHAO_P2_INSERT_DEBUG
   log = std::stringstream();
   log << "---insert out,top no split---" << key << " | thread " << std::this_thread::get_id() << std::endl;
   LOG_DEBUG("%s", log.str().c_str());
 #endif
-  rwlatch_.WUnlock();
   return true;
 }
 
@@ -424,24 +418,28 @@ auto BPLUSTREE_TYPE::Insert(const KeyType &key, const ValueType &value, Transact
  */
 INDEX_TEMPLATE_ARGUMENTS
 void BPLUSTREE_TYPE::Remove(const KeyType &key, Transaction *txn) {
-  // 锁控制，目前为一把大锁
-  rwlatch_.WLock();
-#ifdef ZHHAO_P2_DEBUG
+  // 锁控制，目前为借助page_guard的基础锁策略
+#ifdef ZHHAO_P2_REMOVE_DEBUG
   auto log = std::stringstream();
   log << "---remove---" << key << " | thread " << std::this_thread::get_id() << std::endl;
   LOG_DEBUG("%s", log.str().c_str());
 #endif
   Context ctx;
   ctx.write_set_.clear();
-  if (IsEmpty()) {
-    rwlatch_.WUnlock();
+  WritePageGuard header_guard = bpm_->FetchPageWrite(header_page_id_);
+  auto header_page = header_guard.template AsMut<BPlusTreeHeaderPage>();
+  if (header_page->root_page_id_ == INVALID_PAGE_ID) {
     return;
   }
 
   // 先找到叶子结点，同时存储路径
-  ctx.root_page_id_ = GetRootPageId();
+  ctx.root_page_id_ = header_page->root_page_id_;
   WritePageGuard guard = bpm_->FetchPageWrite(ctx.root_page_id_);
-  auto curr_page = guard.template As<InternalPage>();
+  auto curr_page = guard.template AsMut<InternalPage>();
+  ctx.write_set_.push_back(std::move(header_guard));
+  if ((curr_page->IsLeafPage() && curr_page->GetSize() >= 2) || curr_page->GetSize() >= 3) {
+    ctx.write_set_.clear();  // 此处不需要主动drop释放，至少我试验过的没问题
+  }
   ctx.write_set_.push_back(std::move(guard));
   while (!curr_page->IsLeafPage()) {
     WritePageGuard guard;
@@ -454,17 +452,29 @@ void BPLUSTREE_TYPE::Remove(const KeyType &key, Transaction *txn) {
         guard = bpm_->FetchPageWrite(curr_page->ValueAt(i));
       }
     }
-    curr_page = guard.template As<InternalPage>();
+    curr_page = guard.template AsMut<InternalPage>();
     if (curr_page->GetSize() > curr_page->GetMinSize()) {
       ctx.write_set_.clear();
     }
     ctx.write_set_.push_back(std::move(guard));
   }
-
-  // 到达叶子结点后，判断key的情况，先处理两个小case
   auto leaf_guard = std::move(ctx.write_set_.back());
   auto leaf_page = leaf_guard.template AsMut<LeafPage>();
   ctx.write_set_.pop_back();
+#ifdef ZHHAO_P2_REMOVE_DEBUG
+  log = std::stringstream();
+  log << "thread " << std::this_thread::get_id() << " | insert"
+      << ": " << key << " [page_id: " << leaf_guard.PageId() << ", size: " << leaf_guard.As<BPlusTreePage>()->GetSize()
+      << "/" << leaf_guard.As<BPlusTreePage>()->GetMaxSize() << "]" << std::endl
+      << "parent ids: ";
+  for (auto &page_guard : ctx.write_set_) {
+    log << page_guard.PageId() << " → ";
+  }
+  log << leaf_guard.PageId();
+  LOG_DEBUG("%s", log.str().c_str());
+#endif
+
+  // 到达叶子结点后，判断key的情况，先处理两个小case
   KeyType key_for_locate = leaf_page->KeyAt(0);  // 该变量仅为处理后续parent_page无key可用的情况
                                                  // 需注意无论该key是否会被删除,都可用于表征其parent的位置
   int delete_slot = -1;
@@ -476,7 +486,11 @@ void BPLUSTREE_TYPE::Remove(const KeyType &key, Transaction *txn) {
     }
   }
   if (delete_slot == -1) {
-    rwlatch_.WUnlock();
+#ifdef ZHHAO_P2_REMOVE_DEBUG
+    auto log = std::stringstream();
+    log << "---remove out,target key not found---" << key << " | thread " << std::this_thread::get_id() << std::endl;
+    LOG_DEBUG("%s", log.str().c_str());
+#endif
     return;
   }
   // 先删key，如果不需要merge（大小符合或只有根结点,因为根结点的min为1），直接返回
@@ -491,7 +505,12 @@ void BPLUSTREE_TYPE::Remove(const KeyType &key, Transaction *txn) {
       auto header_page = bpm_->FetchPageWrite(header_page_id_).template AsMut<BPlusTreeHeaderPage>();
       header_page->root_page_id_ = INVALID_PAGE_ID;
     }
-    rwlatch_.WUnlock();
+#ifdef ZHHAO_P2_REMOVE_DEBUG
+    auto log = std::stringstream();
+    log << "---remove out,no merge or borrow for leaf, or just drop for root---" << key << " | thread "
+        << std::this_thread::get_id() << std::endl;
+    LOG_DEBUG("%s", log.str().c_str());
+#endif
     return;
   }
 
@@ -531,7 +550,6 @@ void BPLUSTREE_TYPE::Remove(const KeyType &key, Transaction *txn) {
         rsibling_page->SetAt(i - 1, rsibling_page->KeyAt(i), rsibling_page->ValueAt(i));
       }
       rsibling_page->IncreaseSize(-1);
-      rwlatch_.WUnlock();
       return;
     }
     // 与右兄弟合并
@@ -562,7 +580,6 @@ void BPLUSTREE_TYPE::Remove(const KeyType &key, Transaction *txn) {
                        lsibling_page->ValueAt(lsibling_page->GetSize() - 1));
       parent_page->SetKeyAt(orign_slot_in_parent, lsibling_page->KeyAt(lsibling_page->GetSize() - 1));
       lsibling_page->IncreaseSize(-1);
-      rwlatch_.WUnlock();
       return;
     }
     // 与左兄弟合并
@@ -593,7 +610,6 @@ void BPLUSTREE_TYPE::Remove(const KeyType &key, Transaction *txn) {
         rsibling_page->SetAt(i - 1, rsibling_page->KeyAt(i), rsibling_page->ValueAt(i));
       }
       rsibling_page->IncreaseSize(-1);
-      rwlatch_.WUnlock();
       return;
     }
     if (lsibling_page->GetSize() > lsibling_page->GetMinSize()) {
@@ -606,7 +622,6 @@ void BPLUSTREE_TYPE::Remove(const KeyType &key, Transaction *txn) {
                        lsibling_page->ValueAt(lsibling_page->GetSize() - 1));
       parent_page->SetKeyAt(orign_slot_in_parent, lsibling_page->KeyAt(lsibling_page->GetSize() - 1));
       lsibling_page->IncreaseSize(-1);
-      rwlatch_.WUnlock();
       return;
     }
     // 与右兄弟合并
@@ -635,6 +650,12 @@ void BPLUSTREE_TYPE::Remove(const KeyType &key, Transaction *txn) {
     // 下面的代码基本和前面的差不多
     auto curr_page = curr_guard.template AsMut<InternalPage>();
     auto parent_page = parent_guard.template AsMut<InternalPage>();
+    if (parent_guard.PageId() == header_page_id_) {
+      auto header_page = reinterpret_cast<BPlusTreeHeaderPage *>(parent_page);
+      header_page->root_page_id_ = curr_page->ValueAt(0);
+      curr_guard.Drop();
+      return;
+    }
     int orign_slot_in_parent = -1;
     if (curr_page->GetSize() != 1) {
       key_for_locate = curr_page->KeyAt(1);
@@ -667,7 +688,6 @@ void BPLUSTREE_TYPE::Remove(const KeyType &key, Transaction *txn) {
           rsibling_page->SetValueAt(i - 1, rsibling_page->ValueAt(i));
         }
         rsibling_page->IncreaseSize(-1);
-        rwlatch_.WUnlock();
         return;
       }
       // 与右兄弟合并
@@ -703,7 +723,6 @@ void BPLUSTREE_TYPE::Remove(const KeyType &key, Transaction *txn) {
         curr_page->SetValueAt(0, lsibling_page->ValueAt(lsibling_page->GetSize() - 1));
         parent_page->SetKeyAt(orign_slot_in_parent, lsibling_page->KeyAt(lsibling_page->GetSize() - 1));
         lsibling_page->IncreaseSize(-1);
-        rwlatch_.WUnlock();
         return;
       }
       // 与左兄弟合并
@@ -740,7 +759,6 @@ void BPLUSTREE_TYPE::Remove(const KeyType &key, Transaction *txn) {
           rsibling_page->SetValueAt(i - 1, rsibling_page->ValueAt(i));
         }
         rsibling_page->IncreaseSize(-1);
-        rwlatch_.WUnlock();
         return;
       }
       if (lsibling_page->GetSize() > lsibling_page->GetMinSize()) {
@@ -756,7 +774,6 @@ void BPLUSTREE_TYPE::Remove(const KeyType &key, Transaction *txn) {
         curr_page->SetValueAt(0, lsibling_page->ValueAt(lsibling_page->GetSize() - 1));
         parent_page->SetKeyAt(orign_slot_in_parent, lsibling_page->KeyAt(lsibling_page->GetSize() - 1));
         lsibling_page->IncreaseSize(-1);
-        rwlatch_.WUnlock();
         return;
       }
       // 与右兄弟合并
@@ -777,17 +794,7 @@ void BPLUSTREE_TYPE::Remove(const KeyType &key, Transaction *txn) {
     }
     ctx.write_set_.push_back(std::move(parent_guard));
   }
-  WritePageGuard top_guard = std::move(ctx.write_set_.back());
-  ctx.write_set_.pop_back();
-  auto top_page = top_guard.template AsMut<InternalPage>();
-  if (top_guard.PageId() == GetRootPageId() && top_page->GetSize() == 1) {
-    // 之后如果需要根结点merge删除
-    WritePageGuard header_guard = bpm_->FetchPageWrite(header_page_id_);
-    auto header_page = header_guard.template AsMut<BPlusTreeHeaderPage>();
-    header_page->root_page_id_ = top_page->ValueAt(0);
-    top_guard.Drop();
-  }
-  rwlatch_.WUnlock();
+  ctx.write_set_.front().Drop();
   // 如果不需要，那么最顶层的parent结点只需要做基本的删除即可，不需要merge
   // 实际上不需要任何操作了；
 }

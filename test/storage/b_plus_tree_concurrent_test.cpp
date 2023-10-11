@@ -23,6 +23,9 @@
 #include "storage/index/b_plus_tree.h"
 #include "test_util.h"  // NOLINT
 
+// #define INSERT_TEST
+#define REMOVE_TEST
+
 namespace bustub {
 
 using bustub::DiskManagerUnlimitedMemory;
@@ -189,43 +192,83 @@ TEST(BPlusTreeConcurrentTest, InsertTest2) {
   std::cin >> internal_size;
   BPlusTree<GenericKey<8>, RID, GenericComparator<8>> tree("foo_pk", header_page->GetPageId(), bpm, comparator,
                                                            leaf_size, internal_size);
-  // keys to Insert
+  // keys to Insert & Remove
   std::cout << "key size and thread nums:" << std::endl;
   std::vector<int64_t> keys;
+  std::vector<int64_t> remove_keys;
   int64_t scale_factor;
   std::cin >> scale_factor;
   for (int64_t key = 1; key < scale_factor; key++) {
     keys.push_back(key);
+    if (key % 3 != 0) {
+      remove_keys.push_back(key);
+    }
   }
   auto rng = std::default_random_engine{};
-  std::shuffle(keys.begin(), keys.end(), rng);
+  std::shuffle(remove_keys.begin(), remove_keys.end(), rng);
   int64_t thread_nums;
   std::cin >> thread_nums;
-  LaunchParallelTest(thread_nums, InsertHelperSplit, &tree, keys, thread_nums);
 
-  std::vector<RID> rids;
-  GenericKey<8> index_key;
-  for (auto key : keys) {
-    rids.clear();
-    index_key.SetFromInteger(key);
-    tree.GetValue(index_key, &rids);
-    EXPECT_EQ(rids.size(), 1);
+#ifdef INSERT_TEST
+  {  // 插入测试
+    LaunchParallelTest(thread_nums, InsertHelperSplit, &tree, keys, thread_nums);
+    std::vector<RID> rids;
+    GenericKey<8> index_key;
+    for (auto key : keys) {
+      rids.clear();
+      index_key.SetFromInteger(key);
+      tree.GetValue(index_key, &rids);
+      EXPECT_EQ(rids.size(), 1);
 
-    int64_t value = key & 0xFFFFFFFF;
-    EXPECT_EQ(rids[0].GetSlotNum(), value);
+      int64_t value = key & 0xFFFFFFFF;
+      EXPECT_EQ(rids[0].GetSlotNum(), value);
+    }
+    int64_t start_key = 1;
+    int64_t current_key = start_key;
+    index_key.SetFromInteger(start_key);
+    for (auto iterator = tree.Begin(index_key); iterator != tree.End(); ++iterator) {
+      auto location = (*iterator).second;
+      EXPECT_EQ(location.GetPageId(), 0);
+      EXPECT_EQ(location.GetSlotNum(), current_key);
+      current_key = current_key + 1;
+    }
+
+    EXPECT_EQ(current_key, keys.size() + 1);
   }
-
-  int64_t start_key = 1;
-  int64_t current_key = start_key;
-  index_key.SetFromInteger(start_key);
-  for (auto iterator = tree.Begin(index_key); iterator != tree.End(); ++iterator) {
-    auto location = (*iterator).second;
-    EXPECT_EQ(location.GetPageId(), 0);
-    EXPECT_EQ(location.GetSlotNum(), current_key);
-    current_key = current_key + 1;
+#endif
+#ifdef REMOVE_TEST
+  {  // 删除测试
+    InsertHelper(&tree, keys);
+    LaunchParallelTest(thread_nums, DeleteHelperSplit, &tree, remove_keys, thread_nums);
+    std::vector<RID> rids;
+    GenericKey<8> index_key;
+    for (auto key : keys) {
+      rids.clear();
+      index_key.SetFromInteger(key);
+      tree.GetValue(index_key, &rids);
+      if (std::find(remove_keys.begin(), remove_keys.end(), key) == remove_keys.end()) {
+        EXPECT_EQ(rids.size(), 1);
+        int64_t value = key & 0xFFFFFFFF;
+        EXPECT_EQ(rids[0].GetSlotNum(), value);
+      } else {
+        EXPECT_EQ(rids.size(), 0);
+      }
+    }
+    int64_t start_key = 1;
+    int64_t current_key = start_key;
+    index_key.SetFromInteger(start_key);
+    for (auto iterator = tree.Begin(index_key); iterator != tree.End(); ++iterator) {
+      auto location = (*iterator).second;
+      EXPECT_EQ(location.GetPageId(), 0);
+      if (std::find(remove_keys.begin(), remove_keys.end(), current_key) == remove_keys.end()) {
+        EXPECT_EQ(location.GetSlotNum(), current_key);
+      } else {
+        EXPECT_EQ(1, 0);
+      }
+      current_key = current_key + 1;
+    }
   }
-
-  EXPECT_EQ(current_key, keys.size() + 1);
+#endif
 
   bpm->UnpinPage(HEADER_PAGE_ID, true);
   delete bpm;
