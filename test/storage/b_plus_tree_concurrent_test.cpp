@@ -24,7 +24,8 @@
 #include "test_util.h"  // NOLINT
 
 // #define INSERT_TEST
-#define REMOVE_TEST
+// #define REMOVE_TEST
+#define GET_TEST
 
 namespace bustub {
 
@@ -104,6 +105,26 @@ void DeleteHelperSplit(BPlusTree<GenericKey<8>, RID, GenericComparator<8>> *tree
     if (static_cast<uint64_t>(key) % total_threads == thread_itr) {
       index_key.SetFromInteger(key);
       tree->Remove(index_key, transaction);
+    }
+  }
+  delete transaction;
+}
+
+void LookupHelperSplit(BPlusTree<GenericKey<8>, RID, GenericComparator<8>> *tree, const std::vector<int64_t> &keys,
+                       int total_threads, __attribute__((unused)) uint64_t thread_itr = 0) {
+  auto *transaction = new Transaction(0);
+  GenericKey<8> index_key;
+  RID rid;
+  for (auto key : keys) {
+    if (static_cast<uint64_t>(key) % total_threads == thread_itr) {
+      int64_t value = key & 0xFFFFFFFF;
+      rid.Set(static_cast<int32_t>(key >> 32), value);
+      index_key.SetFromInteger(key);
+      std::vector<RID> result;
+      bool res = tree->GetValue(index_key, &result, transaction);
+      ASSERT_EQ(res, true);
+      ASSERT_EQ(result.size(), 1);
+      ASSERT_EQ(result[0], rid);
     }
   }
   delete transaction;
@@ -208,7 +229,12 @@ TEST(BPlusTreeConcurrentTest, InsertTest2) {
   std::shuffle(remove_keys.begin(), remove_keys.end(), rng);
   int64_t thread_nums;
   std::cin >> thread_nums;
-
+#ifdef GET_TEST
+  {  // 查找测试
+    InsertHelper(&tree, keys);
+    LaunchParallelTest(thread_nums, LookupHelperSplit, &tree, keys, thread_nums);
+  }
+#endif
 #ifdef INSERT_TEST
   {  // 插入测试
     LaunchParallelTest(thread_nums, InsertHelperSplit, &tree, keys, thread_nums);

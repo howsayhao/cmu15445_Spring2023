@@ -9,8 +9,10 @@
 #include "storage/page/b_plus_tree_header_page.h"
 #include "storage/page/page_guard.h"
 
-#define ZHHAO_P2_INSERT_DEBUG
-#define ZHHAO_P2_REMOVE_DEBUG
+// #define ZHHAO_P2_INSERT_DEBUG
+// #define ZHHAO_P2_REMOVE_DEBUG
+// #define ZHHAO_P2_GET_DEBUG
+#define ZHHAO_P2_GET0_DEBUG
 
 namespace bustub {
 
@@ -52,23 +54,37 @@ auto BPLUSTREE_TYPE::IsEmpty() const -> bool {
 INDEX_TEMPLATE_ARGUMENTS
 auto BPLUSTREE_TYPE::GetValue(const KeyType &key, std::vector<ValueType> *result, Transaction *txn) -> bool {
   // 找到叶子结点，如果没有则返回false
-  rwlatch_.RLock();
-
-#ifdef ZHHAO_P2_INSERT_DEBUG
+#ifdef ZHHAO_P2_GET_DEBUG
   auto log = std::stringstream();
   log << "---get---" << key << " | thread " << std::this_thread::get_id() << " | leaf size:" << leaf_max_size_
       << " | internal size:" << internal_max_size_ << std::endl;
   LOG_DEBUG("%s", log.str().c_str());
 #endif
   ReadPageGuard head_guard = bpm_->FetchPageRead(header_page_id_);
+#ifdef ZHHAO_P2_GET_DEBUG
+  log = std::stringstream();
+  log << "---get header---" << key << " | thread " << std::this_thread::get_id() << std::endl;
+  LOG_DEBUG("%s", log.str().c_str());
+#endif
   if (head_guard.template As<BPlusTreeHeaderPage>()->root_page_id_ == INVALID_PAGE_ID) {
-    rwlatch_.RUnlock();
+#ifdef ZHHAO_P2_GET_DEBUG
+    log = std::stringstream();
+    log << "---get out,empty---" << key << " | thread " << std::this_thread::get_id() << std::endl;
+    LOG_DEBUG("%s", log.str().c_str());
+#endif
     return false;
   }
   ReadPageGuard guard = bpm_->FetchPageRead(head_guard.As<BPlusTreeHeaderPage>()->root_page_id_);
+#ifdef ZHHAO_P2_GET_DEBUG
+  log = std::stringstream();
+  log << "get PageId(root): " << head_guard.As<BPlusTreeHeaderPage>()->root_page_id_ << " | thread "
+      << std::this_thread::get_id() << std::endl;
+  LOG_DEBUG("%s", log.str().c_str());
+#endif
+  head_guard.Drop();
   auto curr_page = guard.template As<BPlusTreePage>();
   while (!curr_page->IsLeafPage()) {
-    auto *internal_page = reinterpret_cast<const InternalPage *>(curr_page);
+    auto internal_page = reinterpret_cast<const InternalPage *>(curr_page);
     for (int i = 1; i < internal_page->GetSize(); i++) {  // 注意，这里的getsize是已经包括了空槽的了，所以<
       if (comparator_(key, internal_page->KeyAt(i)) < 0) {
         guard = bpm_->FetchPageRead(internal_page->ValueAt(i - 1));
@@ -78,6 +94,11 @@ auto BPLUSTREE_TYPE::GetValue(const KeyType &key, std::vector<ValueType> *result
         guard = bpm_->FetchPageRead(internal_page->ValueAt(i));
       }
     }
+#ifdef ZHHAO_P2_GET_DEBUG
+    log = std::stringstream();
+    log << "get PageId: " << guard.PageId() << " | thread " << std::this_thread::get_id() << std::endl;
+    LOG_DEBUG("%s", log.str().c_str());
+#endif
     curr_page = guard.template As<BPlusTreePage>();
   }
   auto *leaf_page = reinterpret_cast<const LeafPage *>(curr_page);
@@ -86,16 +107,14 @@ auto BPLUSTREE_TYPE::GetValue(const KeyType &key, std::vector<ValueType> *result
   for (int i = 0; i < leaf_page->GetSize(); i++) {
     if (comparator_(key, leaf_page->KeyAt(i)) == 0) {
       (*result).push_back(leaf_page->ValueAt(i));
-      rwlatch_.RUnlock();
       return true;
     }
   }
-#ifdef ZHHAO_P2_INSERT_DEBUG
+#ifdef ZHHAO_P2_GET_DEBUG
   log = std::stringstream();
   log << "---get can not found---" << key << " | thread " << std::this_thread::get_id() << std::endl;
   LOG_DEBUG("%s", log.str().c_str());
 #endif
-  rwlatch_.RUnlock();
   return false;
 }
 
