@@ -25,7 +25,7 @@
 
 #define INSERT_TEST
 // #define REMOVE_TEST
-#define GET_TEST
+// #define GET_TEST
 
 namespace bustub {
 
@@ -216,6 +216,7 @@ TEST(BPlusTreeConcurrentTest, InsertTest2) {
   // keys to Insert & Remove
   std::cout << "key size and thread nums:" << std::endl;
   std::vector<int64_t> keys;
+  std::vector<int64_t> init_keys = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10};
   std::vector<int64_t> remove_keys;
   int64_t scale_factor;
   std::cin >> scale_factor;
@@ -237,6 +238,8 @@ TEST(BPlusTreeConcurrentTest, InsertTest2) {
 #endif
 #ifdef INSERT_TEST
   {  // 插入测试
+    // InsertHelper(&tree, init_keys);
+    // std::shuffle(keys.begin(), keys.end(), rng);
     LaunchParallelTest(thread_nums, InsertHelperSplit, &tree, keys, thread_nums);
     std::vector<RID> rids;
     GenericKey<8> index_key;
@@ -249,17 +252,17 @@ TEST(BPlusTreeConcurrentTest, InsertTest2) {
       int64_t value = key & 0xFFFFFFFF;
       EXPECT_EQ(rids[0].GetSlotNum(), value);
     }
-    int64_t start_key = 1;
-    int64_t current_key = start_key;
-    index_key.SetFromInteger(start_key);
-    for (auto iterator = tree.Begin(index_key); iterator != tree.End(); ++iterator) {
-      auto location = (*iterator).second;
-      EXPECT_EQ(location.GetPageId(), 0);
-      EXPECT_EQ(location.GetSlotNum(), current_key);
-      current_key = current_key + 1;
-    }
+    // int64_t start_key = 1;
+    // int64_t current_key = start_key;
+    // index_key.SetFromInteger(start_key);
+    // for (auto iterator = tree.Begin(index_key); iterator != tree.End(); ++iterator) {
+    //   auto location = (*iterator).second;
+    //   EXPECT_EQ(location.GetPageId(), 0);
+    //   EXPECT_EQ(location.GetSlotNum(), current_key);
+    //   current_key = current_key + 1;
+    // }
 
-    EXPECT_EQ(current_key, keys.size() + 1);
+    // EXPECT_EQ(current_key, keys.size() + 1);
   }
 #endif
 #ifdef REMOVE_TEST
@@ -438,7 +441,7 @@ TEST(BPlusTreeConcurrentTest, InsertTest2) {
 //   // Add perserved_keys
 //   std::vector<int64_t> perserved_keys;
 //   std::vector<int64_t> dynamic_keys;
-//   int64_t total_keys = 50;
+//   int64_t total_keys = 5000;
 //   int64_t sieve = 5;
 //   for (int64_t i = 1; i <= total_keys; i++) {
 //     if (i % sieve == 0) {

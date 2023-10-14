@@ -11,10 +11,18 @@
 //===----------------------------------------------------------------------===//
 
 #include "buffer/buffer_pool_manager.h"
+#include <sstream>
+// #include <thread>
 
 #include "common/exception.h"
 #include "common/macros.h"
 #include "storage/page/page_guard.h"
+
+#include "include/common/config.h"
+#include "include/common/logger.h"
+#include "storage/index/b_plus_tree.h"
+
+// #define ZHHAO_P2_BUFFERPOOL_DEBUG
 
 namespace bustub {
 
@@ -70,17 +78,23 @@ auto BufferPoolManager::NewPage(page_id_t *page_id) -> Page * {
 
 auto BufferPoolManager::FetchPage(page_id_t page_id, [[maybe_unused]] AccessType access_type) -> Page * {
   latch_.lock();
-  if (page_table_.find(page_id) == page_table_.end() && replacer_->Size() <= 0 && free_list_.empty()) {
+#ifdef ZHHAO_P2_BUFFERPOOL_DEBUG
+  std::cout << "fetch page: " << page_id << "  | max_buffer_pool_size: " << this->replacer_->MaxSize()
+            << "  | curr_buffer_pool_size: " << this->replacer_->GetSize()
+            << "  | curr_evictable_nums: " << this->replacer_->GetEvictableSize()
+            << "  | tread: " << std::this_thread::get_id() << std::endl;
+#endif
+  if (page_table_.find(page_id) == page_table_.end() && replacer_->GetEvictableSize() <= 0 && free_list_.empty()) {
     latch_.unlock();
     return nullptr;
   }
   frame_id_t frame_to_fetch;
   if (page_table_.find(page_id) == page_table_.end()) {  // 尚未装载到pgtbl中，因为没有对应的frame给到这个page_id
-    if (free_list_.empty()) {                            // 要么是需要踢出一些frame
+    if (free_list_.empty()) {                            // 要么是需要踢出一些frame的
       replacer_->Evict(&frame_to_fetch);
       page_table_.erase(pages_[frame_to_fetch].GetPageId());
       pages_[frame_to_fetch].pin_count_ = 1;
-    } else {  // 要么是frame还有没用的
+    } else {  // 要么是free_list里frame还有没用的
       frame_to_fetch = free_list_.front();
       free_list_.pop_front();
       pages_[frame_to_fetch].pin_count_ = 1;

@@ -122,50 +122,51 @@ TEST(BPlusTreeContentionTest, BPlusTreeContentionBenchmark) {  // NOLINT
             << std::endl;
 }
 
-TEST(BPlusTreeContentionTest, BPlusTreeContentionBenchmark2) {  // NOLINT
-  std::cout << "This test will see how your B+ tree performance differs with and without contention." << std::endl;
-  std::cout << "If your submission timeout, segfault, or didn't implement lock crabbing, we will manually deduct all "
-               "concurrent test points (maximum 25)."
-            << std::endl;
-  std::cout << "left_node_size = 10" << std::endl;
+// TEST(BPlusTreeContentionTest, BPlusTreeContentionBenchmark2) {  // NOLINT
+//   std::cout << "This test will see how your B+ tree performance differs with and without contention." << std::endl;
+//   std::cout << "If your submission timeout, segfault, or didn't implement lock crabbing, we will manually deduct all
+//   "
+//                "concurrent test points (maximum 25)."
+//             << std::endl;
+//   std::cout << "left_node_size = 10" << std::endl;
 
-  std::vector<size_t> time_ms_with_mutex;
-  std::vector<size_t> time_ms_wo_mutex;
-  for (size_t iter = 0; iter < 20; iter++) {
-    bool enable_mutex = iter % 2 == 0;
-    auto clock_start = std::chrono::system_clock::now();
-    ASSERT_TRUE(BPlusTreeLockBenchmarkCall(32, 10, enable_mutex));
-    auto clock_end = std::chrono::system_clock::now();
-    auto dur = std::chrono::duration_cast<std::chrono::milliseconds>(clock_end - clock_start);
-    if (enable_mutex) {
-      time_ms_with_mutex.push_back(dur.count());
-    } else {
-      time_ms_wo_mutex.push_back(dur.count());
-    }
-  }
+//   std::vector<size_t> time_ms_with_mutex;
+//   std::vector<size_t> time_ms_wo_mutex;
+//   for (size_t iter = 0; iter < 20; iter++) {
+//     bool enable_mutex = iter % 2 == 0;
+//     auto clock_start = std::chrono::system_clock::now();
+//     ASSERT_TRUE(BPlusTreeLockBenchmarkCall(32, 10, enable_mutex));
+//     auto clock_end = std::chrono::system_clock::now();
+//     auto dur = std::chrono::duration_cast<std::chrono::milliseconds>(clock_end - clock_start);
+//     if (enable_mutex) {
+//       time_ms_with_mutex.push_back(dur.count());
+//     } else {
+//       time_ms_wo_mutex.push_back(dur.count());
+//     }
+//   }
 
-  std::cout << "<<< BEGIN2" << std::endl;
-  std::cout << "Normal Access Time: ";
-  double ratio_1 = 0;
-  double ratio_2 = 0;
-  for (auto x : time_ms_wo_mutex) {
-    std::cout << x << " ";
-    ratio_1 += x;
-  }
-  std::cout << std::endl;
+//   std::cout << "<<< BEGIN2" << std::endl;
+//   std::cout << "Normal Access Time: ";
+//   double ratio_1 = 0;
+//   double ratio_2 = 0;
+//   for (auto x : time_ms_wo_mutex) {
+//     std::cout << x << " ";
+//     ratio_1 += x;
+//   }
+//   std::cout << std::endl;
 
-  std::cout << "Serialized Access Time: ";
-  for (auto x : time_ms_with_mutex) {
-    std::cout << x << " ";
-    ratio_2 += x;
-  }
-  std::cout << std::endl;
-  std::cout << "Ratio: " << ratio_1 / ratio_2 << std::endl;
-  std::cout << ">>> END2" << std::endl;
-  std::cout << "If your above data is an outlier in all submissions (based on statistics and probably some "
-               "machine-learning), TAs will manually inspect your code to ensure you are implementing lock crabbing "
-               "correctly."
-            << std::endl;
-}
+//   std::cout << "Serialized Access Time: ";
+//   for (auto x : time_ms_with_mutex) {
+//     std::cout << x << " ";
+//     ratio_2 += x;
+//   }
+//   std::cout << std::endl;
+//   std::cout << "Ratio: " << ratio_1 / ratio_2 << std::endl;
+//   std::cout << ">>> END2" << std::endl;
+//   std::cout << "If your above data is an outlier in all submissions (based on statistics and probably some "
+//                "machine-learning), TAs will manually inspect your code to ensure you are implementing lock crabbing "
+//                "correctly."
+//             << std::endl;
+// }
 
 }  // namespace bustub

@@ -13,6 +13,8 @@
 #include "buffer/lru_k_replacer.h"
 #include "common/exception.h"
 
+// #define ZHHAO_P2_DEBUG
+
 namespace bustub {
 
 LRUKReplacer::LRUKReplacer(size_t num_frames, size_t k) : replacer_size_(num_frames), k_(k) {}
@@ -34,14 +36,6 @@ auto LRUKReplacer::Evict(frame_id_t *frame_id) -> bool {
           frame_to_evict = it.first;
         }
       } else if (!inf) {  // LRU-K
-        // auto count = this->k_;
-        // size_t kth_stamp = it.second.History().front();
-        // auto iterator = it.second.History();
-        // for (auto kth = iterator.rbegin(); count > 0; kth++, count--) {
-        // if (count == 1) {
-        // kth_stamp = *kth;
-        // }
-        // }
         if (max_time_stamp < diff_stamp) {
           max_time_stamp = diff_stamp;
           frame_to_evict = it.first;
@@ -66,6 +60,9 @@ void LRUKReplacer::RecordAccess(frame_id_t frame_id, [[maybe_unused]] AccessType
     latch_.unlock();
     BUSTUB_ASSERT("id {} :out of replacer_size_ range", frame_id);
   }
+#ifdef ZHHAO_P2_DEBUG
+  std::cout << "frame get accessed: " << frame_id << "  | current_buffer_size: " << node_store_.size() << std::endl;
+#endif
   if (this->node_store_.find(frame_id) == this->node_store_.end()) {
     this->node_store_.insert(std::make_pair(frame_id, LRUKNode(k_)));
   }
@@ -114,9 +111,16 @@ void LRUKReplacer::Remove(frame_id_t frame_id) {
   latch_.unlock();
 }
 
-auto LRUKReplacer::Size() -> size_t {
+auto LRUKReplacer::GetEvictableSize() -> size_t {
   latch_.lock();
   auto current_size = this->curr_size_;
+  latch_.unlock();
+  return current_size;
+}
+
+auto LRUKReplacer::GetSize() -> size_t {
+  latch_.lock();
+  auto current_size = this->node_store_.size();
   latch_.unlock();
   return current_size;
 }
