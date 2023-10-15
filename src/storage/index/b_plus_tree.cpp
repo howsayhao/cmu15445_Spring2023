@@ -205,6 +205,16 @@ auto BPLUSTREE_TYPE::Insert(const KeyType &key, const ValueType &value, Transact
   WritePageGuard leaf_crab_guard = bpm_->FetchPageWrite(leaf_page_id);
   ctx.read_set_.pop_front();
   auto leaf_crab_page = leaf_crab_guard.AsMut<LeafPage>();
+#ifdef ZHHAO_P2_INSERT_DEBUG
+  log = std::stringstream();
+  log << "insert crab inspect: ";
+  log << " | thread " << std::this_thread::get_id() << std::endl;
+  for (int i=0; i<leaf_crab_page->GetSize(); i++) {
+    log << leaf_crab_page->KeyAt(i) << ", ";
+  }
+  log << "   | page id: " << leaf_crab_guard.PageId() << std::endl;
+  LOG_DEBUG("%s", log.str().c_str());
+#endif
   for (int i = 0; i < leaf_crab_page->GetSize(); i++) {  // 先判断duplicate_key
     if (comparator_(leaf_crab_page->KeyAt(i), key) == 0) {
 #ifdef ZHHAO_P2_INSERT_DEBUG
@@ -450,8 +460,10 @@ auto BPLUSTREE_TYPE::Insert(const KeyType &key, const ValueType &value, Transact
     page_id_t root_page_id;
     bpm_->NewPageGuarded(&root_page_id);
     root_header_page->root_page_id_ = root_page_id;
+    WritePageGuard guard = bpm_->FetchPageWrite(root_page_id);  // 这里的fetch必须在父节点drop之前，
+                                                                // 因为否则的话该page id已经被获取了，但该guard还未初始化
+                                                                // 那么其他进程在悲观锁部分会先一步fetch，并对未初始化的guard进行操作
     ctx.write_set_.front().Drop();
-    WritePageGuard guard = bpm_->FetchPageWrite(root_page_id);
     auto root_page = guard.template AsMut<InternalPage>();
     root_page->Init();
     root_page->SetMaxSize(internal_max_size_);
