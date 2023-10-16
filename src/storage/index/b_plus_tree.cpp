@@ -3,18 +3,18 @@
 
 #include "common/config.h"
 #include "common/exception.h"
-#include "common/logger.h"
+// #include "common/logger.h"
 #include "common/rid.h"
 #include "storage/index/b_plus_tree.h"
 #include "storage/page/b_plus_tree_header_page.h"
 #include "storage/page/page_guard.h"
 
-#define ZHHAO_P2_INSERT_DEBUG
+// #define ZHHAO_P2_INSERT_DEBUG
 // #define ZHHAO_P2_REMOVE_DEBUG
 // #define ZHHAO_P2_GET_DEBUG
-#define ZHHAO_P2_GET0_DEBUG
-#define ZHHAO_P2_INSERT0_DEBUG
-#define ZHHAO_P2_ITER_DEBUG
+// #define ZHHAO_P2_GET0_DEBUG
+// #define ZHHAO_P2_INSERT0_DEBUG
+// #define ZHHAO_P2_ITER_DEBUG
 
 namespace bustub {
 
@@ -43,7 +43,9 @@ auto BPLUSTREE_TYPE::IsEmpty() const -> bool {
   // 我这里有点意识到为什么要专门搞一个header_page了，可以提高并发
   ReadPageGuard guard = bpm_->FetchPageRead(header_page_id_);
   auto root_header_page = guard.template As<BPlusTreeHeaderPage>();
-  return root_header_page->root_page_id_ == INVALID_PAGE_ID;
+  bool is_empty = root_header_page->root_page_id_ == INVALID_PAGE_ID;
+  guard.Drop();
+  return is_empty;
 }
 /*****************************************************************************
  * SEARCH
@@ -133,6 +135,9 @@ auto BPLUSTREE_TYPE::GetValue(const KeyType &key, std::vector<ValueType> *result
 INDEX_TEMPLATE_ARGUMENTS
 auto BPLUSTREE_TYPE::Insert(const KeyType &key, const ValueType &value, Transaction *txn) -> bool {
 #ifdef ZHHAO_P2_INSERT0_DEBUG
+  std::cout << "insert: " << key << std::endl;
+#endif
+#ifdef ZHHAO_P2_INSERT_DEBUG
   auto log = std::stringstream();
   log << "---insert---" << key << " | thread " << std::this_thread::get_id() << std::endl;
   LOG_DEBUG("%s", log.str().c_str());
@@ -151,9 +156,10 @@ auto BPLUSTREE_TYPE::Insert(const KeyType &key, const ValueType &value, Transact
   if (head_write_guard.AsMut<BPlusTreeHeaderPage>()->root_page_id_ == INVALID_PAGE_ID) {
     auto root_header_page = head_write_guard.template AsMut<BPlusTreeHeaderPage>();
     page_id_t root_page_id;
-    bpm_->NewPageGuarded(&root_page_id);
-    root_header_page->root_page_id_ = root_page_id;
+    BasicPageGuard tmp_pin_guard = bpm_->NewPageGuarded(&root_page_id);
     WritePageGuard guard = bpm_->FetchPageWrite(root_page_id);
+    tmp_pin_guard.Drop();
+    root_header_page->root_page_id_ = root_page_id;
     head_write_guard.Drop();
     auto root_page = guard.template AsMut<LeafPage>();
     root_page->Init();
@@ -209,10 +215,10 @@ auto BPLUSTREE_TYPE::Insert(const KeyType &key, const ValueType &value, Transact
   log = std::stringstream();
   log << "insert crab inspect: ";
   log << " | thread " << std::this_thread::get_id() << std::endl;
-  for (int i=0; i<leaf_crab_page->GetSize(); i++) {
+  for (int i = 0; i < leaf_crab_page->GetSize(); i++) {
     log << leaf_crab_page->KeyAt(i) << ", ";
   }
-  log << "   | page id: " << leaf_crab_guard.PageId() << std::endl;
+  log << "   | page id: " << leaf_crab_guard.PageId() << "  | key: " << key << std::endl;
   LOG_DEBUG("%s", log.str().c_str());
 #endif
   for (int i = 0; i < leaf_crab_page->GetSize(); i++) {  // 先判断duplicate_key
@@ -351,8 +357,9 @@ auto BPLUSTREE_TYPE::Insert(const KeyType &key, const ValueType &value, Transact
   KeyType split_key;
   page_id_t split_page_id;
   // 先将叶子结点处理掉，将叶子结点分裂开，提供给上方pid,key1,key2三个东西
-  bpm_->NewPageGuarded(&split_page_id);
+  BasicPageGuard tmp_pin_guard = bpm_->NewPageGuarded(&split_page_id);
   auto split_guard = bpm_->FetchPageWrite(split_page_id);
+  tmp_pin_guard.Drop();
   auto split_leaf_page = split_guard.template AsMut<LeafPage>();
   split_leaf_page->Init();
   split_leaf_page->SetMaxSize(leaf_max_size_);
@@ -390,8 +397,10 @@ auto BPLUSTREE_TYPE::Insert(const KeyType &key, const ValueType &value, Transact
   // 这一过程的行为和处理叶子的相似但不一样，所以不能合用代码
   page_id_t new_split_page_id;
   while (ctx.write_set_.size() > 1) {
-    bpm_->NewPageGuarded(&new_split_page_id);
-    WritePageGuard split_guard = bpm_->FetchPageWrite(new_split_page_id);  // 这两个作为局部变量，这样就可以自动drop了
+    BasicPageGuard tmp_pin_guard = bpm_->NewPageGuarded(&new_split_page_id);
+    WritePageGuard split_guard =
+        bpm_->FetchPageWrite(new_split_page_id);  // 这两个guard设为局部变量，这样就可以自动drop了
+    tmp_pin_guard.Drop();
     WritePageGuard parent_guard = std::move(ctx.write_set_.back());
     ctx.write_set_.pop_back();
     orign_page_id = parent_guard.PageId();
@@ -458,11 +467,14 @@ auto BPLUSTREE_TYPE::Insert(const KeyType &key, const ValueType &value, Transact
 #endif
     auto root_header_page = ctx.write_set_.front().template AsMut<BPlusTreeHeaderPage>();
     page_id_t root_page_id;
-    bpm_->NewPageGuarded(&root_page_id);
+    BasicPageGuard tmp_pin_guard =
+        bpm_->NewPageGuarded(&root_page_id);  // 只是临时的guard，用完马上drop，免得影响后续的unpin以及evict
     root_header_page->root_page_id_ = root_page_id;
-    WritePageGuard guard = bpm_->FetchPageWrite(root_page_id);  // 这里的fetch必须在父节点drop之前，
-                                                                // 因为否则的话该page id已经被获取了，但该guard还未初始化
-                                                                // 那么其他进程在悲观锁部分会先一步fetch，并对未初始化的guard进行操作
+    WritePageGuard guard =
+        bpm_->FetchPageWrite(root_page_id);  // 这里的fetch必须在父节点drop之前，
+                                             // 因为否则的话该page id已经被获取了，但该guard还未初始化
+                                             // 那么其他进程在悲观锁部分会先一步fetch，并对未初始化的guard进行操作
+    tmp_pin_guard.Drop();  // 保护frame slot的任务已经完成了，需要把额外的那份pin给取消掉
     ctx.write_set_.front().Drop();
     auto root_page = guard.template AsMut<InternalPage>();
     root_page->Init();
@@ -997,7 +1009,9 @@ INDEX_TEMPLATE_ARGUMENTS
 auto BPLUSTREE_TYPE::GetRootPageId() -> page_id_t {
   ReadPageGuard guard = bpm_->FetchPageRead(header_page_id_);
   auto root_header_page = guard.template As<BPlusTreeHeaderPage>();
-  return root_header_page->root_page_id_;
+  page_id_t root_page_id = root_header_page->root_page_id_;
+  guard.Drop();
+  return root_page_id;
 }
 
 /*****************************************************************************

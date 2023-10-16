@@ -69,6 +69,16 @@ auto BufferPoolManager::NewPage(page_id_t *page_id) -> Page * {
   // 更新在LRUK-Replacer中的记录信息
   replacer_->RecordAccess(frame_to_set);
   replacer_->SetEvictable(frame_to_set, false);
+  // PROJ_2#2，DEBUG_LOG
+  // 这一处的逻辑是这样的，如果没有这个，因为会出现还没有来得及对某page做修改就因为evictable被驱逐了，此时
+  // 有个进程会要去用这个page，已知page id，但没有写回则disk_manager不认为自己分配了该page，会报错，返回空数据
+  // 但返回空数据本身没有影响，因为逻辑上还没有修改过的数据返回空数据也符合预期，这也是为什么虽然报错但基本的查询结果都没问题
+  // 分析：我在b_plus_tree的实现中，在获取新page时为NewPageGuarded; guard =
+  // FetchGuarded;前者是有返回值的，但我没有绑定变量
+  // 这使得新New的guard遵循RAII设计自主释放了，因而可以被驱逐；所以我再接着想fetch时就可能会得到空数据；
+  // 可如果仅仅是这个，问题貌似不是太大，无非是爆一些warning而已
+  // 正常的写回没有问题，因为我b_plus_tree是唯一使用并调用page的应用层，而每次调用page我都有AsMut，所以脏位设置应该没有遗漏
+  // disk_manager_->WritePage(*page_id, pages_[frame_to_set].GetData());
 
   auto return_page = &pages_[frame_to_set];
   latch_.unlock();
@@ -93,11 +103,9 @@ auto BufferPoolManager::FetchPage(page_id_t page_id, [[maybe_unused]] AccessType
     if (free_list_.empty()) {                            // 要么是需要踢出一些frame的
       replacer_->Evict(&frame_to_fetch);
       page_table_.erase(pages_[frame_to_fetch].GetPageId());
-      pages_[frame_to_fetch].pin_count_ = 1;
     } else {  // 要么是free_list里frame还有没用的
       frame_to_fetch = free_list_.front();
       free_list_.pop_front();
-      pages_[frame_to_fetch].pin_count_ = 1;
     }
     page_table_.insert(std::make_pair(page_id, frame_to_fetch));  // 得到frame后，马上装载进pgtbl里
   } else {  // 是在原已有的page上读入，那么没有必要清除这个frame的history
@@ -114,11 +122,11 @@ auto BufferPoolManager::FetchPage(page_id_t page_id, [[maybe_unused]] AccessType
   if (pages_[frame_to_fetch].IsDirty()) {
     disk_manager_->WritePage(pages_[frame_to_fetch].GetPageId(), pages_[frame_to_fetch].GetData());  //
   }
+  pages_[frame_to_fetch].pin_count_ = 1;
   pages_[frame_to_fetch].page_id_ = page_id;
   pages_[frame_to_fetch].is_dirty_ = false;
 
   disk_manager_->ReadPage(page_id, pages_[frame_to_fetch].GetData());
-  // 除了在原有page上读入，其他的都不需要设为dirty，因为就算dirty刚刚也已经写回disk了
   replacer_->RecordAccess(frame_to_fetch);
   replacer_->SetEvictable(frame_to_fetch, false);
 
@@ -231,6 +239,7 @@ auto BufferPoolManager::FetchPageWrite(page_id_t page_id) -> WritePageGuard {
 auto BufferPoolManager::NewPageGuarded(page_id_t *page_id) -> BasicPageGuard {
   // std::cout << "new basic page: " << page_id << std::endl;
   auto fetch_page = NewPage(page_id);
+
   return {this, fetch_page};
 }
 

@@ -11,6 +11,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "buffer/lru_k_replacer.h"
+#include <cstddef>
 #include "common/exception.h"
 
 // #define ZHHAO_P2_DEBUG
@@ -124,5 +125,7 @@ auto LRUKReplacer::GetSize() -> size_t {
   latch_.unlock();
   return current_size;
 }
+
+auto LRUKReplacer::Size() -> size_t { return GetSize(); }
 
 }  // namespace bustub

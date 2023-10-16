@@ -14,6 +14,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <functional>
+// #include <future>
 #include <random>
 #include <thread>  // NOLINT
 
@@ -240,18 +241,31 @@ TEST(BPlusTreeConcurrentTest, InsertTest2) {
   {  // 插入测试
     // InsertHelper(&tree, init_keys);
     // std::shuffle(keys.begin(), keys.end(), rng);
-    LaunchParallelTest(thread_nums, InsertHelperSplit, &tree, keys, thread_nums);
-    // std::vector<RID> rids;
-    // GenericKey<8> index_key;
-    // for (auto key : keys) {
-    //   rids.clear();
-    //   index_key.SetFromInteger(key);
-    //   tree.GetValue(index_key, &rids);
-    //   EXPECT_EQ(rids.size(), 1);
+    // auto clock_start = std::chrono::system_clock::now();
+    // int64_t runs;
+    // std::cin >> runs;
+    // for (int j = 0; j < runs; j++) {
+      LaunchParallelTest(thread_nums, InsertHelperSplit, &tree, keys, thread_nums);
+      std::cout << "-----------------------------------------" << std::endl;
+      std::vector<RID> rids;
+      GenericKey<8> index_key;
+      for (auto key : keys) {
+        rids.clear();
+        index_key.SetFromInteger(key);
+        tree.GetValue(index_key, &rids);
+        EXPECT_EQ(rids.size(), 1);
 
-    //   int64_t value = key & 0xFFFFFFFF;
-    //   EXPECT_EQ(rids[0].GetSlotNum(), value);
+        int64_t value = key & 0xFFFFFFFF;
+        EXPECT_EQ(rids[0].GetSlotNum(), value);
+      }
     // }
+    // auto clock_end = std::chrono::system_clock::now();
+    // double dr_ms = std::chrono::duration<double, std::milli>(clock_end - clock_start).count();
+    // // 防止报错地址泄露，没有释放bpm以及buffer pool的各个page
+    // bpm->UnpinPage(HEADER_PAGE_ID, true);
+    // delete bpm;
+    // ASSERT_TRUE(dr_ms < 30000);
+
     // int64_t start_key = 1;
     // int64_t current_key = start_key;
     // index_key.SetFromInteger(start_key);
