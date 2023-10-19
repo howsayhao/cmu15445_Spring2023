@@ -245,9 +245,12 @@ TEST(BPlusTreeConcurrentTest, InsertTest2) {
     std::cout << "#runs: " << std::endl;
     int64_t runs;
     std::cin >> runs;
+    std::string filename;
+    std::cin >> filename;
     for (int j = 0; j < runs; j++) {
       LaunchParallelTest(thread_nums, InsertHelperSplit, &tree, keys, thread_nums);
       std::cout << "-----------------------------------------" << std::endl;
+      tree.Draw(bpm, filename);
       // DeleteHelper(&tree, keys);
       std::vector<RID> rids;
       GenericKey<8> index_key;
@@ -277,8 +280,8 @@ TEST(BPlusTreeConcurrentTest, InsertTest2) {
         current_key = current_key + 1;
       }
     }
-
     // EXPECT_EQ(current_key, keys.size() + 1);
+    // DeleteHelper(&tree, keys);
   }
 #endif
 #ifdef REMOVE_TEST

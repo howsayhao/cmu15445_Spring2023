@@ -176,35 +176,24 @@ auto BPLUSTREE_TYPE::Insert(const KeyType &key, const ValueType &value, Transact
       vice_key.SetFromInteger(1);
       bool already_found{false};
       while (!already_found) {
+        int slot_num;
         for (int i = 1; i < curr_read_page->GetSize(); i++) {  // 注意，这里的getsize是已经包括了空槽的了，所以<
-          if (comparator_(key, curr_read_page->KeyAt(i)) < 0) {
+          if (comparator_(key, curr_read_page->KeyAt(i)) < 0 || i+1 == curr_read_page->GetSize()) {
             if (comparator_(curr_read_page->KeyAt(0), vice_key) != 0) {
-              read_guard = bpm_->FetchPageRead(curr_read_page->ValueAt(i - 1));
+              slot_num = (i+1 == curr_read_page->GetSize()) ? i : (i - 1);
+              read_guard = bpm_->FetchPageRead(curr_read_page->ValueAt(slot_num));
               curr_read_page = read_guard.template As<InternalPage>();
             } else {
-              leaf_crab_guard = bpm_->FetchPageWrite(curr_read_page->ValueAt(i - 1));
+              slot_num = (i+1 == curr_read_page->GetSize()) ? i : (i - 1) ;
+              leaf_crab_guard = bpm_->FetchPageWrite(curr_read_page->ValueAt(slot_num));
               read_guard.Drop();
               already_found = true;
             }
             break;
           }
-          if (i + 1 == curr_read_page->GetSize()) {  // 取最后一个child node
-            if (comparator_(curr_read_page->KeyAt(0), vice_key) != 0) {
-              read_guard = bpm_->FetchPageRead(curr_read_page->ValueAt(i));
-              curr_read_page = read_guard.template As<InternalPage>();
-            } else {
-              leaf_crab_guard = bpm_->FetchPageWrite(curr_read_page->ValueAt(i));
-              read_guard.Drop();
-              already_found = true;
-            }
-          }
         }
       }
     }
-    // page_id_t leaf_page_id = read_guard.PageId();
-    // read_guard.Drop();
-    // WritePageGuard leaf_crab_guard = bpm_->FetchPageWrite(leaf_page_id);
-    // ctx.read_set_.pop_front();
     auto leaf_crab_page = leaf_crab_guard.AsMut<LeafPage>();
 #ifdef ZHHAO_P2_INSERT_DEBUG
     log = std::stringstream();
