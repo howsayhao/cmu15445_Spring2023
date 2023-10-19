@@ -9,11 +9,11 @@
 #include "storage/page/b_plus_tree_header_page.h"
 #include "storage/page/page_guard.h"
 
-// #define ZHHAO_P2_INSERT_DEBUG
-// #define ZHHAO_P2_REMOVE_DEBUG
+#define ZHHAO_P2_INSERT_DEBUG
+#define ZHHAO_P2_REMOVE_DEBUG
 // #define ZHHAO_P2_GET_DEBUG
 // #define ZHHAO_P2_GET0_DEBUG
-// #define ZHHAO_P2_INSERT0_DEBUG
+#define ZHHAO_P2_INSERT0_DEBUG
 // #define ZHHAO_P2_ITER_DEBUG
 
 namespace bustub {
@@ -157,37 +157,54 @@ auto BPLUSTREE_TYPE::Insert(const KeyType &key, const ValueType &value, Transact
   LOG_DEBUG("%s", log.str().c_str());
 #endif
   auto head_read_page = head_read_guard.As<BPlusTreeHeaderPage>();
-  if (head_read_page->root_page_id_ == INVALID_PAGE_ID) {
-    head_read_guard.Drop();
-  } else {
-    ReadPageGuard read_guard = bpm_->FetchPageRead(head_read_guard.As<BPlusTreeHeaderPage>()->root_page_id_);
-    // head_read_guard.Drop();
-    ctx.read_set_.push_back(std::move(head_read_guard));
-    auto curr_read_page = read_guard.template As<BPlusTreePage>();
-    while (!curr_read_page->IsLeafPage()) {
-      ctx.read_set_.pop_front();  // 对性能做出让步，在未确定是叶子结点前始终保留其父亲结点，
-                                  // 否则remove可能会使得leaf_page_id指向已被回收的空间；
-                                  // 对于insert也会有，因为原leaf_page_id指向空间可能分裂了；
-                                  // 而且，因为leaf_page_id指向空间未知，可能是其他进程持有的空间，
-                                  // 而如果他们之间存在死锁可能，比如delete获取写锁，但insert正拥有读锁；
-      auto internal_page = reinterpret_cast<const InternalPage *>(curr_read_page);
-      for (int i = 1; i < internal_page->GetSize(); i++) {  // 注意，这里的getsize是已经包括了空槽的了，所以<
-        if (comparator_(key, internal_page->KeyAt(i)) < 0) {
-          ctx.read_set_.push_back(std::move(read_guard));
-          read_guard = bpm_->FetchPageRead(internal_page->ValueAt(i - 1));
-          break;
-        }
-        if (i + 1 == internal_page->GetSize()) {  // 取最后一个child node
-          ctx.read_set_.push_back(std::move(read_guard));
-          read_guard = bpm_->FetchPageRead(internal_page->ValueAt(i));
+  // if (head_read_page->root_page_id_ == INVALID_PAGE_ID) {
+  //   head_read_guard.Drop();
+  // } else {
+  if (head_read_page->root_page_id_ != INVALID_PAGE_ID) {
+    ReadPageGuard read_guard = bpm_->FetchPageRead(head_read_page->root_page_id_);
+    WritePageGuard leaf_crab_guard;
+    auto curr_read_page = read_guard.template As<InternalPage>();
+    // 下一部分获得叶子结点的WriteGuard
+    if (curr_read_page->IsLeafPage()) {
+      read_guard.Drop();
+      leaf_crab_guard = bpm_->FetchPageWrite(head_read_page->root_page_id_);
+      head_read_guard.Drop();
+    } else {
+      head_read_guard.Drop();
+      // ctx.read_set_.push_back(std::move(head_read_guard));
+      KeyType vice_key;
+      vice_key.SetFromInteger(1);
+      bool already_found{false};
+      while (!already_found) {
+        for (int i = 1; i < curr_read_page->GetSize(); i++) {  // 注意，这里的getsize是已经包括了空槽的了，所以<
+          if (comparator_(key, curr_read_page->KeyAt(i)) < 0) {
+            if (comparator_(curr_read_page->KeyAt(0), vice_key) != 0) {
+              read_guard = bpm_->FetchPageRead(curr_read_page->ValueAt(i - 1));
+              curr_read_page = read_guard.template As<InternalPage>();
+            } else {
+              leaf_crab_guard = bpm_->FetchPageWrite(curr_read_page->ValueAt(i - 1));
+              read_guard.Drop();
+              already_found = true;
+            }
+            break;
+          }
+          if (i + 1 == curr_read_page->GetSize()) {  // 取最后一个child node
+            if (comparator_(curr_read_page->KeyAt(0), vice_key) != 0) {
+              read_guard = bpm_->FetchPageRead(curr_read_page->ValueAt(i));
+              curr_read_page = read_guard.template As<InternalPage>();
+            } else {
+              leaf_crab_guard = bpm_->FetchPageWrite(curr_read_page->ValueAt(i));
+              read_guard.Drop();
+              already_found = true;
+            }
+          }
         }
       }
-      curr_read_page = read_guard.template As<BPlusTreePage>();
     }
-    page_id_t leaf_page_id = read_guard.PageId();
-    read_guard.Drop();
-    WritePageGuard leaf_crab_guard = bpm_->FetchPageWrite(leaf_page_id);
-    ctx.read_set_.pop_front();
+    // page_id_t leaf_page_id = read_guard.PageId();
+    // read_guard.Drop();
+    // WritePageGuard leaf_crab_guard = bpm_->FetchPageWrite(leaf_page_id);
+    // ctx.read_set_.pop_front();
     auto leaf_crab_page = leaf_crab_guard.AsMut<LeafPage>();
 #ifdef ZHHAO_P2_INSERT_DEBUG
     log = std::stringstream();
@@ -230,10 +247,11 @@ auto BPLUSTREE_TYPE::Insert(const KeyType &key, const ValueType &value, Transact
       return true;
     }
     leaf_crab_guard.Drop();
+  } else {
+    head_read_guard.Drop();
   }
 
   /* 之后是非改进版的螃蟹锁策略 */
-  /* 首先处理root page为空的情况，保证至少有两个page: header_page 和 root_page */
   WritePageGuard head_write_guard = bpm_->FetchPageWrite(header_page_id_);
 #ifdef ZHHAO_P2_INSERT_DEBUG
   log = std::stringstream();
@@ -398,6 +416,7 @@ auto BPLUSTREE_TYPE::Insert(const KeyType &key, const ValueType &value, Transact
   // 不断迭代上推，直到只剩最后一个non-split parent，如果没有non-split parent那么全部推出
   // 这一过程的行为和处理叶子的相似但不一样，所以不能合用代码
   page_id_t new_split_page_id;
+  bool vice_terminal{true};
   while (ctx.write_set_.size() > 1) {
     BasicPageGuard tmp_pin_guard = bpm_->NewPageGuarded(&new_split_page_id);
     WritePageGuard split_guard =
@@ -455,6 +474,13 @@ auto BPLUSTREE_TYPE::Insert(const KeyType &key, const ValueType &value, Transact
     parent_page->SetSize(parent_page->GetMaxSize() / 2 + 1);
     split_page->SetKeyAt(split_page->GetSize() - 1, kins);
     split_page->SetValueAt(split_page->GetSize() - 1, pins);
+    // 处理次终端结点增加的情况
+    if (vice_terminal) {
+      KeyType vice_key;
+      vice_key.SetFromInteger(1);
+      split_page->SetKeyAt(0, vice_key);
+      vice_terminal = false;
+    }
     orign_key = parent_page->KeyAt(1);
     split_page_id = new_split_page_id;
     split_key = new_split_key;
@@ -485,6 +511,12 @@ auto BPLUSTREE_TYPE::Insert(const KeyType &key, const ValueType &value, Transact
     root_page->SetKeyAt(1, split_key);
     root_page->SetValueAt(1, split_page_id);
     root_page->SetValueAt(0, orign_page_id);
+    if (vice_terminal) {
+      KeyType vice_key;
+      vice_key.SetFromInteger(1);
+      root_page->SetKeyAt(0, vice_key);
+      vice_terminal = false;
+    }
 #ifdef ZHHAO_P2_INSERT_DEBUG
     log = std::stringstream();
     log << "---insert out,root rebuilt---" << key << " | thread " << std::this_thread::get_id() << std::endl;
