@@ -248,35 +248,35 @@ TEST(BPlusTreeConcurrentTest, InsertTest2) {
     for (int j = 0; j < runs; j++) {
       LaunchParallelTest(thread_nums, InsertHelperSplit, &tree, keys, thread_nums);
       std::cout << "-----------------------------------------" << std::endl;
-      DeleteHelper(&tree, keys);
-      // std::vector<RID> rids;
-      // GenericKey<8> index_key;
-      // for (auto key : keys) {
-      //   rids.clear();
-      //   index_key.SetFromInteger(key);
-      //   tree.GetValue(index_key, &rids);
-      //   EXPECT_EQ(rids.size(), 1);
+      // DeleteHelper(&tree, keys);
+      std::vector<RID> rids;
+      GenericKey<8> index_key;
+      for (auto key : keys) {
+        rids.clear();
+        index_key.SetFromInteger(key);
+        tree.GetValue(index_key, &rids);
+        EXPECT_EQ(rids.size(), 1);
 
-      //   int64_t value = key & 0xFFFFFFFF;
-      //   EXPECT_EQ(rids[0].GetSlotNum(), value);
-      // }
+        int64_t value = key & 0xFFFFFFFF;
+        EXPECT_EQ(rids[0].GetSlotNum(), value);
+      }
+      // auto clock_end = std::chrono::system_clock::now();
+      // double dr_ms = std::chrono::duration<double, std::milli>(clock_end - clock_start).count();
+      // 防止报错地址泄露，没有释放bpm以及buffer pool的各个page
+      // bpm->UnpinPage(HEADER_PAGE_ID, true);
+      // delete bpm;
+      // ASSERT_TRUE(dr_ms < 30000);
+
+      int64_t start_key = 1;
+      int64_t current_key = start_key;
+      index_key.SetFromInteger(start_key);
+      for (auto iterator = tree.Begin(index_key); iterator != tree.End(); ++iterator) {
+        auto location = (*iterator).second;
+        EXPECT_EQ(location.GetPageId(), 0);
+        EXPECT_EQ(location.GetSlotNum(), current_key);
+        current_key = current_key + 1;
+      }
     }
-    // auto clock_end = std::chrono::system_clock::now();
-    // double dr_ms = std::chrono::duration<double, std::milli>(clock_end - clock_start).count();
-    // // 防止报错地址泄露，没有释放bpm以及buffer pool的各个page
-    // bpm->UnpinPage(HEADER_PAGE_ID, true);
-    // delete bpm;
-    // ASSERT_TRUE(dr_ms < 30000);
-
-    // int64_t start_key = 1;
-    // int64_t current_key = start_key;
-    // index_key.SetFromInteger(start_key);
-    // for (auto iterator = tree.Begin(index_key); iterator != tree.End(); ++iterator) {
-    //   auto location = (*iterator).second;
-    //   EXPECT_EQ(location.GetPageId(), 0);
-    //   EXPECT_EQ(location.GetSlotNum(), current_key);
-    //   current_key = current_key + 1;
-    // }
 
     // EXPECT_EQ(current_key, keys.size() + 1);
   }
