@@ -279,6 +279,7 @@ TEST(BPlusTreeConcurrentTest, InsertTest2) {
         EXPECT_EQ(location.GetSlotNum(), current_key);
         current_key = current_key + 1;
       }
+      DeleteHelper(&tree, keys);
     }
     // EXPECT_EQ(current_key, keys.size() + 1);
     // DeleteHelper(&tree, keys);

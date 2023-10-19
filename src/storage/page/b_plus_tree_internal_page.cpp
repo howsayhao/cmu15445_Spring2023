@@ -44,7 +44,7 @@ auto B_PLUS_TREE_INTERNAL_PAGE_TYPE::KeyAt(int index) const -> KeyType {
     KeyType key = array_[index].first;
     return key;
   }
-  std::cout << "key at, out of internal range:" << index << "max_size:" << GetMaxSize() << std::endl;
+  // std::cout << "key at, out of internal range:" << index << "max_size:" << GetMaxSize() << std::endl;
   // 为了提高并发性，现在允许对该位查询以及设置，若是报出上面的错误，无视掉；
   return array_[0].first;
 }
@@ -55,7 +55,7 @@ void B_PLUS_TREE_INTERNAL_PAGE_TYPE::SetKeyAt(int index, const KeyType &key) {
     array_[index].first = key;
     return;
   }
-  std::cout << "set key, out of internal range" << std::endl;
+  // std::cout << "set key, out of internal range" << std::endl;
   // 比较冒险了，万一是算法结构问题就没有办法检错了
   array_[index].first = key;
 }

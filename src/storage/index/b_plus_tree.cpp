@@ -9,8 +9,8 @@
 #include "storage/page/b_plus_tree_header_page.h"
 #include "storage/page/page_guard.h"
 
-#define ZHHAO_P2_INSERT_DEBUG
-#define ZHHAO_P2_REMOVE_DEBUG
+// #define ZHHAO_P2_INSERT_DEBUG
+// #define ZHHAO_P2_REMOVE_DEBUG
 // #define ZHHAO_P2_GET_DEBUG
 // #define ZHHAO_P2_GET0_DEBUG
 #define ZHHAO_P2_INSERT0_DEBUG
@@ -135,12 +135,15 @@ auto BPLUSTREE_TYPE::GetValue(const KeyType &key, std::vector<ValueType> *result
 INDEX_TEMPLATE_ARGUMENTS
 auto BPLUSTREE_TYPE::Insert(const KeyType &key, const ValueType &value, Transaction *txn) -> bool {
 #ifdef ZHHAO_P2_INSERT0_DEBUG
-  std::cout << "insert: " << key << std::endl;
-#endif
-#ifdef ZHHAO_P2_INSERT_DEBUG
   auto log = std::stringstream();
-  log << "---insert---" << key << " | thread " << std::this_thread::get_id() << std::endl;
-  LOG_DEBUG("%s", log.str().c_str());
+  KeyType index_1;
+  KeyType index_999;
+  index_1.SetFromInteger(1);
+  index_999.SetFromInteger(999);
+  if (comparator_(key, index_1) == 0 || comparator_(key, index_999) == 0) {
+    log << "---insert---" << key << " | thread " << std::this_thread::get_id() << std::endl;
+    LOG_DEBUG("%s", log.str().c_str());
+  }
 #endif
 
   Context ctx;
@@ -178,13 +181,16 @@ auto BPLUSTREE_TYPE::Insert(const KeyType &key, const ValueType &value, Transact
       while (!already_found) {
         int slot_num;
         for (int i = 1; i < curr_read_page->GetSize(); i++) {  // 注意，这里的getsize是已经包括了空槽的了，所以<
-          if (comparator_(key, curr_read_page->KeyAt(i)) < 0 || i+1 == curr_read_page->GetSize()) {
+          // 代码可读比代码整洁要重要的多，这里我强行代码整合而逻辑却没有更简化，最后的结果只是平白多BUG而仅少了略微的代码冗余
+          if (comparator_(key, curr_read_page->KeyAt(i)) < 0 || i + 1 == curr_read_page->GetSize()) {
             if (comparator_(curr_read_page->KeyAt(0), vice_key) != 0) {
-              slot_num = (i+1 == curr_read_page->GetSize()) ? i : (i - 1);
+              slot_num =
+                  (i + 1 == curr_read_page->GetSize() && comparator_(key, curr_read_page->KeyAt(i)) >= 0) ? i : (i - 1);
               read_guard = bpm_->FetchPageRead(curr_read_page->ValueAt(slot_num));
               curr_read_page = read_guard.template As<InternalPage>();
             } else {
-              slot_num = (i+1 == curr_read_page->GetSize()) ? i : (i - 1) ;
+              slot_num =
+                  (i + 1 == curr_read_page->GetSize() && comparator_(key, curr_read_page->KeyAt(i)) >= 0) ? i : (i - 1);
               leaf_crab_guard = bpm_->FetchPageWrite(curr_read_page->ValueAt(slot_num));
               read_guard.Drop();
               already_found = true;
@@ -247,15 +253,15 @@ auto BPLUSTREE_TYPE::Insert(const KeyType &key, const ValueType &value, Transact
   log << "---insert get header for empty judge---" << key << " | thread " << std::this_thread::get_id() << std::endl;
   LOG_DEBUG("%s", log.str().c_str());
 #endif
-  if (head_write_guard.AsMut<BPlusTreeHeaderPage>()->root_page_id_ == INVALID_PAGE_ID) {
-    auto root_header_page = head_write_guard.template AsMut<BPlusTreeHeaderPage>();
+  auto root_header_page = head_write_guard.template AsMut<BPlusTreeHeaderPage>();
+  if (root_header_page->root_page_id_ == INVALID_PAGE_ID) {
     page_id_t root_page_id;
     BasicPageGuard tmp_pin_guard = bpm_->NewPageGuarded(&root_page_id);
-    WritePageGuard guard = bpm_->FetchPageWrite(root_page_id);
+    WritePageGuard root_guard = bpm_->FetchPageWrite(root_page_id);
     tmp_pin_guard.Drop();
     root_header_page->root_page_id_ = root_page_id;
     head_write_guard.Drop();
-    auto root_page = guard.template AsMut<LeafPage>();
+    auto root_page = root_guard.template AsMut<LeafPage>();
     root_page->Init();
     root_page->SetMaxSize(leaf_max_size_);
     root_page->IncreaseSize(1);
@@ -272,7 +278,7 @@ auto BPLUSTREE_TYPE::Insert(const KeyType &key, const ValueType &value, Transact
   log << "---insert get header for bad route---" << key << " | thread " << std::this_thread::get_id() << std::endl;
   LOG_DEBUG("%s", log.str().c_str());
 #endif
-  WritePageGuard guard = bpm_->FetchPageWrite(head_write_guard.AsMut<BPlusTreeHeaderPage>()->root_page_id_);
+  WritePageGuard root_guard = bpm_->FetchPageWrite(root_header_page->root_page_id_);
 #ifdef ZHHAO_P2_INSERT_DEBUG
   log = std::stringstream();
   log << "---insert get header for bad route, and root---" << key << " | thread " << std::this_thread::get_id()
@@ -280,11 +286,11 @@ auto BPLUSTREE_TYPE::Insert(const KeyType &key, const ValueType &value, Transact
   LOG_DEBUG("%s", log.str().c_str());
 #endif
   ctx.write_set_.push_back(std::move(head_write_guard));
-  auto curr_page = guard.template AsMut<InternalPage>();
+  auto curr_page = root_guard.template AsMut<InternalPage>();
   if (curr_page->GetSize() < curr_page->GetMaxSize()) {
     ctx.write_set_.clear();
   }
-  ctx.write_set_.push_back(std::move(guard));
+  ctx.write_set_.push_back(std::move(root_guard));
   while (!curr_page->IsLeafPage()) {
     WritePageGuard guard;
     for (int i = 1; i < curr_page->GetSize(); i++) {  // 注意，这里的getsize是已经包括了空槽的了，所以<
@@ -324,7 +330,10 @@ auto BPLUSTREE_TYPE::Insert(const KeyType &key, const ValueType &value, Transact
   for (auto &page_guard : ctx.write_set_) {
     log << page_guard.PageId() << " → ";
   }
-  log << leaf_guard.PageId();
+  log << leaf_guard.PageId() << std::endl;
+  for (int i = 0; i < leaf_page->GetSize(); i++) {
+    log << leaf_page->KeyAt(i) << ", ";
+  }
   LOG_DEBUG("%s", log.str().c_str());
 #endif
 
@@ -1211,11 +1220,11 @@ void BPLUSTREE_TYPE::ToGraph(page_id_t page_id, const BPlusTreePage *page, std::
     out << "<TR>";
     for (int i = 0; i < inner->GetSize(); i++) {
       out << "<TD PORT=\"p" << inner->ValueAt(i) << "\">";
-      if (i > 0) {
-        out << inner->KeyAt(i) << "  " << inner->ValueAt(i);
-      } else {
-        out << inner->ValueAt(0);
-      }
+      // if (i > 0) {
+      out << inner->KeyAt(i) << "  " << inner->ValueAt(i);
+      // } else {
+      // out << inner->ValueAt(0);
+      // }
       out << "</TD>\n";
     }
     out << "</TR>";
