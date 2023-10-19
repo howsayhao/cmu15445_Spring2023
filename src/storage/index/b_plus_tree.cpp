@@ -621,8 +621,9 @@ void BPLUSTREE_TYPE::Remove(const KeyType &key, Transaction *txn) {
     if (leaf_page->GetSize() == 0) {  // 只可能是根结点，此时树为空，
                                       // 因而为了保持和之前代码的一致性应该删除该page
       leaf_guard.Drop();
-      auto header_page = bpm_->FetchPageWrite(header_page_id_).template AsMut<BPlusTreeHeaderPage>();
-      header_page->root_page_id_ = INVALID_PAGE_ID;
+      // auto header_page = bpm_->FetchPageWrite(header_page_id_).template AsMut<BPlusTreeHeaderPage>();
+      ctx.write_set_.front().template AsMut<BPlusTreeHeaderPage>()->root_page_id_ = INVALID_PAGE_ID;
+      ctx.write_set_.pop_front();
     }
 #ifdef ZHHAO_P2_REMOVE_DEBUG
     auto log = std::stringstream();
