@@ -145,7 +145,94 @@ auto BPLUSTREE_TYPE::Insert(const KeyType &key, const ValueType &value, Transact
 
   Context ctx;
   ctx.write_set_.clear();
+  MappingType tmp;
+  MappingType ins = {key, value};
+  int insert_slot = -1;
 
+  /* 先进行乐观螃蟹加锁部分 */
+  ReadPageGuard head_read_guard = bpm_->FetchPageRead(header_page_id_);
+#ifdef ZHHAO_P2_INSERT_DEBUG
+  log = std::stringstream();
+  log << "---insert get header for positive crab---" << key << " | thread " << std::this_thread::get_id() << std::endl;
+  LOG_DEBUG("%s", log.str().c_str());
+#endif
+  auto head_read_page = head_read_guard.As<BPlusTreeHeaderPage>();
+  if (head_read_page->root_page_id_ == INVALID_PAGE_ID) {
+    head_read_guard.Drop();
+  } else {
+    ReadPageGuard read_guard = bpm_->FetchPageRead(head_read_guard.As<BPlusTreeHeaderPage>()->root_page_id_);
+    // head_read_guard.Drop();
+    ctx.read_set_.push_back(std::move(head_read_guard));
+    auto curr_read_page = read_guard.template As<BPlusTreePage>();
+    while (!curr_read_page->IsLeafPage()) {
+      ctx.read_set_.pop_front();  // 对性能做出让步，在未确定是叶子结点前始终保留其父亲结点，
+                                  // 否则remove可能会使得leaf_page_id指向已被回收的空间；
+                                  // 对于insert也会有，因为原leaf_page_id指向空间可能分裂了；
+                                  // 而且，因为leaf_page_id指向空间未知，可能是其他进程持有的空间，
+                                  // 而如果他们之间存在死锁可能，比如delete获取写锁，但insert正拥有读锁；
+      auto internal_page = reinterpret_cast<const InternalPage *>(curr_read_page);
+      for (int i = 1; i < internal_page->GetSize(); i++) {  // 注意，这里的getsize是已经包括了空槽的了，所以<
+        if (comparator_(key, internal_page->KeyAt(i)) < 0) {
+          ctx.read_set_.push_back(std::move(read_guard));
+          read_guard = bpm_->FetchPageRead(internal_page->ValueAt(i - 1));
+          break;
+        }
+        if (i + 1 == internal_page->GetSize()) {  // 取最后一个child node
+          ctx.read_set_.push_back(std::move(read_guard));
+          read_guard = bpm_->FetchPageRead(internal_page->ValueAt(i));
+        }
+      }
+      curr_read_page = read_guard.template As<BPlusTreePage>();
+    }
+    page_id_t leaf_page_id = read_guard.PageId();
+    read_guard.Drop();
+    WritePageGuard leaf_crab_guard = bpm_->FetchPageWrite(leaf_page_id);
+    ctx.read_set_.pop_front();
+    auto leaf_crab_page = leaf_crab_guard.AsMut<LeafPage>();
+#ifdef ZHHAO_P2_INSERT_DEBUG
+    log = std::stringstream();
+    log << "insert crab inspect: ";
+    log << " | thread " << std::this_thread::get_id() << std::endl;
+    for (int i = 0; i < leaf_crab_page->GetSize(); i++) {
+      log << leaf_crab_page->KeyAt(i) << ", ";
+    }
+    log << "   | page id: " << leaf_crab_guard.PageId() << "  | key: " << key << std::endl;
+    LOG_DEBUG("%s", log.str().c_str());
+#endif
+    for (int i = 0; i < leaf_crab_page->GetSize(); i++) {  // 先判断duplicate_key
+      if (comparator_(leaf_crab_page->KeyAt(i), key) == 0) {
+#ifdef ZHHAO_P2_INSERT_DEBUG
+        log = std::stringstream();
+        log << "---insert out,duplicate---" << key << " | thread " << std::this_thread::get_id() << std::endl;
+        LOG_DEBUG("%s", log.str().c_str());
+#endif
+        return false;
+      }
+    }
+    if (leaf_crab_page->GetSize() < leaf_crab_page->GetMaxSize()) {  // 后判断会不会有split操作，如果不会，乐观插入
+      for (int i = 0; i < leaf_crab_page->GetSize(); i++) {
+        if (comparator_(key, leaf_crab_page->KeyAt(i)) < 0 && insert_slot == -1) {
+          insert_slot = i;
+        }
+        if (insert_slot != -1) {
+          tmp = {leaf_crab_page->KeyAt(i), leaf_crab_page->ValueAt(i)};
+          leaf_crab_page->SetAt(i, ins.first, ins.second);
+          ins = tmp;
+        }
+      }
+      leaf_crab_page->IncreaseSize(1);
+      leaf_crab_page->SetAt(leaf_crab_page->GetSize() - 1, ins.first, ins.second);
+#ifdef ZHHAO_P2_INSERT_DEBUG
+      log = std::stringstream();
+      log << "---insert out,no split leaf---" << key << " | thread " << std::this_thread::get_id() << std::endl;
+      LOG_DEBUG("%s", log.str().c_str());
+#endif
+      return true;
+    }
+    leaf_crab_guard.Drop();
+  }
+
+  /* 之后是非改进版的螃蟹锁策略 */
   /* 首先处理root page为空的情况，保证至少有两个page: header_page 和 root_page */
   WritePageGuard head_write_guard = bpm_->FetchPageWrite(header_page_id_);
 #ifdef ZHHAO_P2_INSERT_DEBUG
@@ -173,104 +260,19 @@ auto BPLUSTREE_TYPE::Insert(const KeyType &key, const ValueType &value, Transact
 #endif
     return true;
   }
-  head_write_guard.Drop();
-
-  /* 先进行乐观螃蟹加锁部分 */
-  ReadPageGuard head_read_guard = bpm_->FetchPageRead(header_page_id_);
-#ifdef ZHHAO_P2_INSERT_DEBUG
-  log = std::stringstream();
-  log << "---insert get header for positive crab---" << key << " | thread " << std::this_thread::get_id() << std::endl;
-  LOG_DEBUG("%s", log.str().c_str());
-#endif
-  ReadPageGuard read_guard = bpm_->FetchPageRead(head_read_guard.As<BPlusTreeHeaderPage>()->root_page_id_);
-  // head_read_guard.Drop();
-  ctx.read_set_.push_back(std::move(head_read_guard));
-  auto curr_read_page = read_guard.template As<BPlusTreePage>();
-  while (!curr_read_page->IsLeafPage()) {
-    ctx.read_set_.pop_front();  // 对性能做出让步，在未确定是叶子结点前始终保留其父亲结点，
-                                // 否则remove可能会使得leaf_page_id指向已被回收的空间；
-                                // 对于insert也会有，因为原leaf_page_id指向空间可能分裂了；
-                                // 而且，因为leaf_page_id指向空间未知，可能是其他进程持有的空间，
-                                // 而如果他们之间存在死锁可能，比如delete获取写锁，但insert正拥有读锁；
-    auto internal_page = reinterpret_cast<const InternalPage *>(curr_read_page);
-    for (int i = 1; i < internal_page->GetSize(); i++) {  // 注意，这里的getsize是已经包括了空槽的了，所以<
-      if (comparator_(key, internal_page->KeyAt(i)) < 0) {
-        ctx.read_set_.push_back(std::move(read_guard));
-        read_guard = bpm_->FetchPageRead(internal_page->ValueAt(i - 1));
-        break;
-      }
-      if (i + 1 == internal_page->GetSize()) {  // 取最后一个child node
-        ctx.read_set_.push_back(std::move(read_guard));
-        read_guard = bpm_->FetchPageRead(internal_page->ValueAt(i));
-      }
-    }
-    curr_read_page = read_guard.template As<BPlusTreePage>();
-  }
-  page_id_t leaf_page_id = read_guard.PageId();
-  read_guard.Drop();
-  WritePageGuard leaf_crab_guard = bpm_->FetchPageWrite(leaf_page_id);
-  ctx.read_set_.pop_front();
-  auto leaf_crab_page = leaf_crab_guard.AsMut<LeafPage>();
-#ifdef ZHHAO_P2_INSERT_DEBUG
-  log = std::stringstream();
-  log << "insert crab inspect: ";
-  log << " | thread " << std::this_thread::get_id() << std::endl;
-  for (int i = 0; i < leaf_crab_page->GetSize(); i++) {
-    log << leaf_crab_page->KeyAt(i) << ", ";
-  }
-  log << "   | page id: " << leaf_crab_guard.PageId() << "  | key: " << key << std::endl;
-  LOG_DEBUG("%s", log.str().c_str());
-#endif
-  for (int i = 0; i < leaf_crab_page->GetSize(); i++) {  // 先判断duplicate_key
-    if (comparator_(leaf_crab_page->KeyAt(i), key) == 0) {
-#ifdef ZHHAO_P2_INSERT_DEBUG
-      log = std::stringstream();
-      log << "---insert out,duplicate---" << key << " | thread " << std::this_thread::get_id() << std::endl;
-      LOG_DEBUG("%s", log.str().c_str());
-#endif
-      return false;
-    }
-  }
-  MappingType tmp;
-  MappingType ins = {key, value};
-  int insert_slot = -1;
-  if (leaf_crab_page->GetSize() < leaf_crab_page->GetMaxSize()) {  // 后判断会不会有split操作
-    for (int i = 0; i < leaf_crab_page->GetSize(); i++) {
-      if (comparator_(key, leaf_crab_page->KeyAt(i)) < 0 && insert_slot == -1) {
-        insert_slot = i;
-      }
-      if (insert_slot != -1) {
-        tmp = {leaf_crab_page->KeyAt(i), leaf_crab_page->ValueAt(i)};
-        leaf_crab_page->SetAt(i, ins.first, ins.second);
-        ins = tmp;
-      }
-    }
-    leaf_crab_page->IncreaseSize(1);
-    leaf_crab_page->SetAt(leaf_crab_page->GetSize() - 1, ins.first, ins.second);
-#ifdef ZHHAO_P2_INSERT_DEBUG
-    log = std::stringstream();
-    log << "---insert out,no split leaf---" << key << " | thread " << std::this_thread::get_id() << std::endl;
-    LOG_DEBUG("%s", log.str().c_str());
-#endif
-    return true;
-  }
-  leaf_crab_guard.Drop();
-
-  /* 之后是非改进版的螃蟹锁策略 */
-  WritePageGuard head_guard = bpm_->FetchPageWrite(header_page_id_);
 #ifdef ZHHAO_P2_INSERT_DEBUG
   log = std::stringstream();
   log << "---insert get header for bad route---" << key << " | thread " << std::this_thread::get_id() << std::endl;
   LOG_DEBUG("%s", log.str().c_str());
 #endif
-  WritePageGuard guard = bpm_->FetchPageWrite(head_guard.AsMut<BPlusTreeHeaderPage>()->root_page_id_);
+  WritePageGuard guard = bpm_->FetchPageWrite(head_write_guard.AsMut<BPlusTreeHeaderPage>()->root_page_id_);
 #ifdef ZHHAO_P2_INSERT_DEBUG
   log = std::stringstream();
   log << "---insert get header for bad route, and root---" << key << " | thread " << std::this_thread::get_id()
       << std::endl;
   LOG_DEBUG("%s", log.str().c_str());
 #endif
-  ctx.write_set_.push_back(std::move(head_guard));
+  ctx.write_set_.push_back(std::move(head_write_guard));
   auto curr_page = guard.template AsMut<InternalPage>();
   if (curr_page->GetSize() < curr_page->GetMaxSize()) {
     ctx.write_set_.clear();
