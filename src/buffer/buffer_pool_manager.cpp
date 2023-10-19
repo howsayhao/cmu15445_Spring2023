@@ -24,6 +24,9 @@
 
 // #define ZHHAO_P2_BUFFERPOOL_DEBUG
 
+// 10/19 上层代码已经没法再优化了，除非是考虑再向兄弟借，可实际上测试点叶子结点大小只有3，中间结点大小倒是有5，这个其实可以做个文章的；
+// 行吧，我先把上层代码的那个思想再落实一下，看看又能提高多少；如果还是过不了，那我真的就只能优化buffer pool和lru-k的锁了，这个不好处理的
+
 namespace bustub {
 
 BufferPoolManager::BufferPoolManager(size_t pool_size, DiskManager *disk_manager, size_t replacer_k,

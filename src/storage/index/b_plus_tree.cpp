@@ -16,6 +16,12 @@
 #define ZHHAO_P2_INSERT0_DEBUG
 // #define ZHHAO_P2_ITER_DEBUG
 
+// 10/19 这一版本准备落实一下向兄弟借以使得各结点的分担平均，这样可以 #1.更快的释放瓶颈锁；#2.因为测试点的数据还是偏skewed的，虽然因为进程不同步这个
+// 情况有所好转，但总归是skewed的，至少你在插入800-999区间时0-199范围的结点还是相对较空的，所以把任务分担给它们一则降低树的高度，二则可以减少写锁封闭的路径长度
+// 降低树的高度对我或许并没那么有利，因为这一定程度降低了我的并发程度，但想到它们本来是用来更多地覆盖我的长路径时，又觉得可以考虑了
+// 分担的行为会增加额外的开销，至少需要申请获取兄弟结点了，不过这也更快释放了顶端瓶颈锁，也还是值得考虑的； 
+// 最后的效果有赖实验，或许只对前几个结点进行兄弟借操作更明显一定，尤其是测试的长度本就不算很大，后面的结点如果也要负载均衡操作，可能对当前不有利，对后续的插入也有益处
+
 namespace bustub {
 
 INDEX_TEMPLATE_ARGUMENTS
@@ -160,9 +166,6 @@ auto BPLUSTREE_TYPE::Insert(const KeyType &key, const ValueType &value, Transact
   LOG_DEBUG("%s", log.str().c_str());
 #endif
   auto head_read_page = head_read_guard.As<BPlusTreeHeaderPage>();
-  // if (head_read_page->root_page_id_ == INVALID_PAGE_ID) {
-  //   head_read_guard.Drop();
-  // } else {
   if (head_read_page->root_page_id_ != INVALID_PAGE_ID) {
     ReadPageGuard read_guard = bpm_->FetchPageRead(head_read_page->root_page_id_);
     WritePageGuard leaf_crab_guard;
@@ -174,7 +177,6 @@ auto BPLUSTREE_TYPE::Insert(const KeyType &key, const ValueType &value, Transact
       head_read_guard.Drop();
     } else {
       head_read_guard.Drop();
-      // ctx.read_set_.push_back(std::move(head_read_guard));
       KeyType vice_key;
       vice_key.SetFromInteger(1);
       bool already_found{false};
