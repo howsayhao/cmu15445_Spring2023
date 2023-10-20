@@ -10,8 +10,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "buffer/lru_k_replacer.h"
 #include <cstddef>
+#include "buffer/lru_k_replacer.h"
 #include "common/exception.h"
 
 // #define ZHHAO_P2_DEBUG

@@ -143,7 +143,8 @@ auto BufferPoolManager::FetchPage(page_id_t page_id, [[maybe_unused]] AccessType
     latch_.unlock();
     return fetch_page;
   }
-  // 得到frame_to_fetch，并都载入了pgtbl; 后续对page中非数据内容放在锁内处理，数据内容放在锁外处理，因为只有获取锁才能对page数据做操作
+  // 得到frame_to_fetch，并都载入了pgtbl;
+  // 后续对page中非数据内容放在锁内处理，数据内容放在锁外处理，因为只有获取锁才能对page数据做操作
   page_id_t orign_page_id = pages_[frame_to_fetch].GetPageId();
   bool is_dirty{false};
   if (pages_[frame_to_fetch].IsDirty()) {
@@ -246,7 +247,7 @@ auto BufferPoolManager::DeletePage(page_id_t page_id) -> bool {
   // page_id_t orign_page_id = pages_[frame_to_delete].GetPageId();
   // 我觉得还是要写回disk的
   // if (pages_[frame_to_delete].IsDirty()) {
-    // is_dirty = true;
+  // is_dirty = true;
   // }
   // 删掉memory里的痕迹
   page_table_.erase(page_id);

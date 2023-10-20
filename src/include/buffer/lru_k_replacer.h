@@ -170,12 +170,7 @@ class LRUKReplacer {
   /* DEBUG的时候用的，不用时注释掉 */
   // auto NODES() const -> std::unordered_map<frame_id_t, LRUKNode> {return node_store_;}
   // auto K() const -> size_t {return k_;}
-  auto MaxSize() -> size_t {
-    latch_.lock();
-    auto max_size = replacer_size_;
-    latch_.unlock();
-    return max_size;
-  }
+  auto MaxSize() -> size_t;
   auto GetSize() -> size_t;
   auto GetEvictableSize() -> size_t;
 
