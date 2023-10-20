@@ -315,7 +315,8 @@ auto BPLUSTREE_TYPE::Insert(const KeyType &key, const ValueType &value, Transact
       // 而且即便接下来马上要插入左兄弟了，最差的情况左兄弟也要分裂，那么也只是要封住那个瓶颈，当然多了以下管理负载均衡的开销
       if (i != 1) {  // 有左兄弟
         auto parent_page = ctx.write_set_.back().AsMut<InternalPage>();
-        WritePageGuard lsibling_guard = bpm_->FetchPageWrite(parent_page->ValueAt(i - 2));  // 主要在于这个的开销其实比较大
+        WritePageGuard lsibling_guard =
+            bpm_->FetchPageWrite(parent_page->ValueAt(i - 2));  // 主要在于这个的开销其实比较大
         auto lsibling_page = lsibling_guard.AsMut<InternalPage>();
         if (lsibling_page->GetSize() < lsibling_page->GetMaxSize()) {  // 可向左兄弟进行负载均衡
           int whole_size = lsibling_page->GetSize() + curr_page->GetSize();

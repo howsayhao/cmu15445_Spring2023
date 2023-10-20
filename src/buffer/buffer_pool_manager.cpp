@@ -48,6 +48,8 @@ BufferPoolManager::~BufferPoolManager() { delete[] pages_; }
 
 auto BufferPoolManager::NewPage(page_id_t *page_id) -> Page * {
   frame_id_t frame_to_set;
+  bool is_dirty{false};
+  page_id_t orign_page_id;
   latch_.lock();
   // 分配好给新page的页框frame
   if (free_list_.empty()) {  // 没有空的frame了，需要找Replacer腾出空间
@@ -55,7 +57,8 @@ auto BufferPoolManager::NewPage(page_id_t *page_id) -> Page * {
                                             // unpin才允许evict
       page_table_.erase(pages_[frame_to_set].GetPageId());
       if (pages_[frame_to_set].IsDirty()) {
-        disk_manager_->WritePage(pages_[frame_to_set].GetPageId(), pages_[frame_to_set].GetData());
+        is_dirty = true;
+        orign_page_id = pages_[frame_to_set].GetPageId();
       }
     } else {
       latch_.unlock();
@@ -86,12 +89,22 @@ auto BufferPoolManager::NewPage(page_id_t *page_id) -> Page * {
   // disk_manager_->WritePage(*page_id, pages_[frame_to_set].GetData());
 
   auto return_page = &pages_[frame_to_set];
+  dlatch_.lock();
   latch_.unlock();
+
+  if (is_dirty) {
+    disk_manager_->WritePage(orign_page_id, pages_[frame_to_set].GetData());
+    dlatch_.unlock();
+  } else {
+    dlatch_.unlock();
+  }
 
   return return_page;
 }
 
 auto BufferPoolManager::FetchPage(page_id_t page_id, [[maybe_unused]] AccessType access_type) -> Page * {
+  // 局部变量尽量放在锁外面，省的占时间
+  frame_id_t frame_to_fetch;
   latch_.lock();
 #ifdef ZHHAO_P2_BUFFERPOOL_DEBUG
   std::cout << "fetch page: " << page_id << "  | max_buffer_pool_size: " << this->replacer_->MaxSize()
@@ -103,7 +116,6 @@ auto BufferPoolManager::FetchPage(page_id_t page_id, [[maybe_unused]] AccessType
     latch_.unlock();
     return nullptr;
   }
-  frame_id_t frame_to_fetch;
   if (page_table_.find(page_id) == page_table_.end()) {  // 尚未装载到pgtbl中，因为没有对应的frame给到这个page_id
     if (free_list_.empty()) {                            // 要么是需要踢出一些frame的
       replacer_->Evict(&frame_to_fetch);
@@ -119,24 +131,49 @@ auto BufferPoolManager::FetchPage(page_id_t page_id, [[maybe_unused]] AccessType
     replacer_->SetEvictable(frame_to_fetch, false);
     pages_[frame_to_fetch].pin_count_++;
     auto fetch_page = &pages_[frame_to_fetch];
+    if (access_type == AccessType::Get) {
+      latch_.unlock();
+      fetch_page->RLatch();
+      latch_.lock();
+    } else if (access_type == AccessType::Scan) {
+      latch_.unlock();
+      fetch_page->WLatch();
+      latch_.lock();
+    }
     latch_.unlock();
     return fetch_page;
   }
-  // 不管是哪种情况，现在已经得到了frame_to_fetch，并都载入了pgtbl，且得到了一个已有数据的page，需要对page的meta
-  // data做一些初始化
+  // 得到frame_to_fetch，并都载入了pgtbl; 后续对page中非数据内容放在锁内处理，数据内容放在锁外处理，因为只有获取锁才能对page数据做操作
+  page_id_t orign_page_id = pages_[frame_to_fetch].GetPageId();
+  bool is_dirty{false};
   if (pages_[frame_to_fetch].IsDirty()) {
-    disk_manager_->WritePage(pages_[frame_to_fetch].GetPageId(), pages_[frame_to_fetch].GetData());  //
+    is_dirty = true;
   }
   pages_[frame_to_fetch].pin_count_ = 1;
   pages_[frame_to_fetch].page_id_ = page_id;
   pages_[frame_to_fetch].is_dirty_ = false;
 
-  disk_manager_->ReadPage(page_id, pages_[frame_to_fetch].GetData());
   replacer_->RecordAccess(frame_to_fetch);
   replacer_->SetEvictable(frame_to_fetch, false);
 
   auto fetch_page = &pages_[frame_to_fetch];
+  if (access_type == AccessType::Get) {
+    fetch_page->RLatch();
+  } else if (access_type == AccessType::Scan) {
+    fetch_page->WLatch();
+  }
+  dlatch_.lock();
   latch_.unlock();
+
+  // 提高对不同page做操作的进程的并发性，对指定页、磁盘内容的访问不同page操作的进程间肯定是不相干扰的
+  if (is_dirty) {
+    disk_manager_->WritePage(orign_page_id, pages_[frame_to_fetch].GetData());
+    dlatch_.unlock();
+  } else {
+    dlatch_.unlock();
+  }
+  disk_manager_->ReadPage(page_id, pages_[frame_to_fetch].GetData());
+
   return fetch_page;
 }
 
@@ -171,19 +208,25 @@ auto BufferPoolManager::FlushPage(page_id_t page_id) -> bool {
   }
 
   auto frame_to_flush = page_table_.at(page_id);
-  disk_manager_->WritePage(page_id, pages_[frame_to_flush].GetData());
   pages_[frame_to_flush].is_dirty_ = false;
 
+  dlatch_.lock();
   latch_.unlock();
+
+  disk_manager_->WritePage(page_id, pages_[frame_to_flush].GetData());
+  dlatch_.unlock();
+
   return true;
 }
 
 void BufferPoolManager::FlushAllPages() {
   latch_.lock();
   for (auto it : page_table_) {
+    latch_.unlock();
     if (!FlushPage(it.first)) {
       BUSTUB_ASSERT("wrong when flushing all pages, at page id: {}.", it.first);
     }
+    latch_.lock();
   }
   latch_.unlock();
 }
@@ -199,11 +242,12 @@ auto BufferPoolManager::DeletePage(page_id_t page_id) -> bool {
     latch_.unlock();
     return false;
   }
+  // bool is_dirty{false};
+  // page_id_t orign_page_id = pages_[frame_to_delete].GetPageId();
   // 我觉得还是要写回disk的
-  if (pages_[frame_to_delete].IsDirty()) {
-    disk_manager_->WritePage(pages_[frame_to_delete].GetPageId(),
-                             pages_[frame_to_delete].GetData());  // dirty不按规矩来
-  }
+  // if (pages_[frame_to_delete].IsDirty()) {
+    // is_dirty = true;
+  // }
   // 删掉memory里的痕迹
   page_table_.erase(page_id);
   replacer_->Remove(frame_to_delete);
@@ -213,8 +257,14 @@ auto BufferPoolManager::DeletePage(page_id_t page_id) -> bool {
   pages_[frame_to_delete].pin_count_ = 0;
 
   DeallocatePage(page_id);
-
+  // dlatch_.lock();
   latch_.unlock();
+  // if (is_dirty) {
+  //   disk_manager_->WritePage(orign_page_id,
+  //                            pages_[frame_to_delete].GetData());  // dirty不按规矩来
+  // }
+  // dlatch_.unlock();
+
   return true;
 }
 
@@ -229,15 +279,15 @@ auto BufferPoolManager::FetchPageBasic(page_id_t page_id) -> BasicPageGuard {
 
 auto BufferPoolManager::FetchPageRead(page_id_t page_id) -> ReadPageGuard {
   // std::cout << "fetch read page: " << page_id << std::endl;
-  auto fetch_page = FetchPage(page_id);
-  fetch_page->RLatch();
+  auto fetch_page = FetchPage(page_id, AccessType::Get);
+  // fetch_page->RLatch();
   return {this, fetch_page};
 }
 
 auto BufferPoolManager::FetchPageWrite(page_id_t page_id) -> WritePageGuard {
   // std::cout << "fetch write page: " << page_id << std::endl;
-  auto fetch_page = FetchPage(page_id);
-  fetch_page->WLatch();
+  auto fetch_page = FetchPage(page_id, AccessType::Scan);
+  // fetch_page->WLatch();
   return {this, fetch_page};
 }
 

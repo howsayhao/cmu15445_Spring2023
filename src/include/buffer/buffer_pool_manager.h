@@ -16,6 +16,7 @@
 #include <memory>
 #include <mutex>  // NOLINT
 #include <unordered_map>
+#include <vector>
 
 #include "buffer/lru_k_replacer.h"
 #include "common/config.h"
@@ -199,6 +200,8 @@ class BufferPoolManager {
 
   /* 优化 */
   ReaderWriterLatch rwdlatch_;  // 保护disk内容的读写锁
+  std::mutex dlatch_;
+  std::vector<page_id_t> vec_;
 
   /**
    * @brief Allocate a page on disk. Caller should acquire the latch before calling this function.
