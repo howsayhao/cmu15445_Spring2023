@@ -16,10 +16,11 @@
 #define ZHHAO_P2_INSERT0_DEBUG
 // #define ZHHAO_P2_ITER_DEBUG
 
-// 10/19 这一版本准备落实一下向兄弟借以使得各结点的分担平均，这样可以 #1.更快的释放瓶颈锁；#2.因为测试点的数据还是偏skewed的，虽然因为进程不同步这个
+// 10/19 这一版本准备落实一下向兄弟借以使得各结点的分担平均，这样可以
+// #1.更快的释放瓶颈锁；#2.因为测试点的数据还是偏skewed的，虽然因为进程不同步这个
 // 情况有所好转，但总归是skewed的，至少你在插入800-999区间时0-199范围的结点还是相对较空的，所以把任务分担给它们一则降低树的高度，二则可以减少写锁封闭的路径长度
 // 降低树的高度对我或许并没那么有利，因为这一定程度降低了我的并发程度，但想到它们本来是用来更多地覆盖我的长路径时，又觉得可以考虑了
-// 分担的行为会增加额外的开销，至少需要申请获取兄弟结点了，不过这也更快释放了顶端瓶颈锁，也还是值得考虑的； 
+// 分担的行为会增加额外的开销，至少需要申请获取兄弟结点了，不过这也更快释放了顶端瓶颈锁，也还是值得考虑的；
 // 最后的效果有赖实验，或许只对前几个结点进行兄弟借操作更明显一定，尤其是测试的长度本就不算很大，后面的结点如果也要负载均衡操作，可能对当前不有利，对后续的插入也有益处
 
 namespace bustub {
@@ -295,7 +296,8 @@ auto BPLUSTREE_TYPE::Insert(const KeyType &key, const ValueType &value, Transact
   ctx.write_set_.push_back(std::move(root_guard));
   while (!curr_page->IsLeafPage()) {
     WritePageGuard guard;
-    for (int i = 1; i < curr_page->GetSize(); i++) {  // 注意，这里的getsize是已经包括了空槽的了，所以<
+    int i = 1;
+    for (; i < curr_page->GetSize(); i++) {  // 注意，这里的getsize是已经包括了空槽的了，所以<
       if (comparator_(key, curr_page->KeyAt(i)) < 0) {
         guard = bpm_->FetchPageWrite(curr_page->ValueAt(i - 1));
         break;
@@ -305,8 +307,56 @@ auto BPLUSTREE_TYPE::Insert(const KeyType &key, const ValueType &value, Transact
       }
     }
     curr_page = guard.template AsMut<InternalPage>();
-    if (curr_page->GetSize() < curr_page->GetMaxSize()) {
+    if (curr_page->GetSize() < curr_page->GetMaxSize()) {  // 此时ctx.write_set_中必然至少有一个父亲结点
       ctx.write_set_.clear();
+    } else if (!curr_page
+                    ->IsLeafPage()) {  // 此处对内部结点进行负载均衡操作，因为测试倾斜向大的缘故，优先向左兄弟分担均衡
+      // 因为兄弟一般也都只有最多2个位子的空余，所以并不需要刻意比较哪个兄弟更富裕(代码复杂些)，一般而言左兄弟更富裕，因为右兄弟一般都是左兄弟分裂而来的
+      // 而且即便接下来马上要插入左兄弟了，最差的情况左兄弟也要分裂，那么也只是要封住那个瓶颈，当然多了以下管理负载均衡的开销
+      if (i != 1) {  // 有左兄弟
+        auto parent_page = ctx.write_set_.back().AsMut<InternalPage>();
+        WritePageGuard lsibling_guard = bpm_->FetchPageWrite(parent_page->ValueAt(i - 2));  // 主要在于这个的开销其实比较大
+        auto lsibling_page = lsibling_guard.AsMut<InternalPage>();
+        if (lsibling_page->GetSize() < lsibling_page->GetMaxSize()) {  // 可向左兄弟进行负载均衡
+          int whole_size = lsibling_page->GetSize() + curr_page->GetSize();
+          int avg_size = whole_size / 2;  // 这个理论上会小一点，留给自己，否则有些情况等于白负载均衡了
+          int left_size = whole_size - avg_size;
+          int init_lsibling_size = lsibling_page->GetSize();
+          int init_rsibling_size = curr_page->GetSize();
+          int diff_size = init_rsibling_size - avg_size;
+          for (int j = init_lsibling_size; j < left_size; j++) {  // 对左兄弟进行负载分配
+            lsibling_page->IncreaseSize(1);
+            lsibling_page->SetValueAt(j, curr_page->ValueAt(j - init_lsibling_size));
+            if (j == init_lsibling_size) {  // 首个key结点应该借用父亲结点的相应值，而父亲结点的该值由之后右结点填充
+              lsibling_page->SetKeyAt(j, parent_page->KeyAt(i - 1));
+            } else {  // 也就是平行地移动，只不过key(0)没有意义所以第一次由父亲结点的key填充
+              lsibling_page->SetKeyAt(j, curr_page->KeyAt(j - init_lsibling_size));
+            }
+          }
+          parent_page->SetKeyAt(i - 1,
+                                curr_page->KeyAt(diff_size));  // 一定会有对左兄弟的分担，所以父结点一定需要填充恢复
+          int j = diff_size + 1;
+          for (; j < init_rsibling_size; j++) {
+            // 倾斜式地赋值，保留key(0)的信息
+            curr_page->SetKeyAt(j - diff_size, curr_page->KeyAt(j));
+            curr_page->SetValueAt(j - diff_size - 1, curr_page->ValueAt(j - 1));
+          }
+          // 最后一个结点需要将其下属的value也移过去
+          curr_page->SetValueAt(init_rsibling_size - diff_size - 1, curr_page->ValueAt(init_rsibling_size - 1));
+          curr_page->IncreaseSize(-diff_size);
+          if (comparator_(key, parent_page->KeyAt(i - 1)) < 0) {  // 如果分摊负载之后被索引到负担变重的左结点了
+            // 那反正不这样处理右结点也会被分裂，所以影响应该不太大，之后的skewed数据也是一样处理，只不过多了管理开销了
+            if (lsibling_page->GetSize() < lsibling_page->GetMaxSize()) {
+              ctx.write_set_.clear();
+            }
+            curr_page = lsibling_guard.template AsMut<InternalPage>();
+            ctx.write_set_.push_back(std::move(lsibling_guard));
+            continue;
+          }
+          // 否则的话因为右结点刚刚减轻负担过，所以不会分裂，那么可以释放父亲结点
+          ctx.write_set_.clear();
+        }
+      }
     }
     ctx.write_set_.push_back(std::move(guard));
   }

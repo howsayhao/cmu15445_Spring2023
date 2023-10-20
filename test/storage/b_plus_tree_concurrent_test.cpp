@@ -323,7 +323,6 @@ void LookupHelper(BPlusTree<GenericKey<8>, RID, GenericComparator<8>> *tree, con
 //   delete bpm;
 // }
 
-
 TEST(BPlusTreeConcurrentTest, Concurrent_InsertTest2) {
   std::cout << "leaf and internal max size :" << std::endl;
   int64_t leaf_size;
@@ -340,7 +339,11 @@ TEST(BPlusTreeConcurrentTest, Concurrent_InsertTest2) {
   std::cin >> runs;
   std::string filename;
   std::cin >> filename;
-  for (int i=0; i<runs; i++) {
+  std::vector<int64_t> keys;
+  for (int64_t key = 1; key < scale_factor; key++) {
+    keys.push_back(key);
+  }
+  for (int i = 0; i < runs; i++) {
     auto key_schema = ParseCreateStatement("a bigint");
     GenericComparator<8> comparator(key_schema.get());
     auto disk_manager = std::make_unique<DiskManagerUnlimitedMemory>();
@@ -348,13 +351,9 @@ TEST(BPlusTreeConcurrentTest, Concurrent_InsertTest2) {
     page_id_t page_id;
     auto header_page = bpm->NewPage(&page_id);
     BPlusTree<GenericKey<8>, RID, GenericComparator<8>> tree("foo_pk", header_page->GetPageId(), bpm, comparator,
-                                                            leaf_size, internal_size);
-    std::vector<int64_t> keys;
-    for (int64_t key = 1; key < scale_factor; key++) {
-      keys.push_back(key);
-    }
+                                                             leaf_size, internal_size);
     auto rng = std::default_random_engine{};
-  
+
     LaunchParallelTest(thread_nums, InsertHelperSplit, &tree, keys, thread_nums);
     std::cout << "-----------------------------------------" << std::endl;
     // tree.Draw(bpm, filename);
