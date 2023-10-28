@@ -48,9 +48,9 @@ void BPlusTreePage::SetMaxSize(int size) { max_size_ = size; }
 auto BPlusTreePage::GetMinSize() const -> int {
   // 这里默认是取下整，另外因为inter-node有一个空槽，所以会出问题，得加个1(取上整的意思)
   if (IsLeafPage()) {
-    return max_size_ / 2;
+    return (max_size_ / 2 > 0) ? max_size_ / 2 : 1;
   }
-  return (max_size_ + 1) / 2;  // max_size不会<=2，那个网站里设为2都会让你重新输的
+  return ((max_size_ + 1) / 2 > 1) ? (max_size_ + 1) / 2 : 2;  // max_size不会<=2，那个网站里设为2都会让你重新输的
 }  // not ceiling?
 
 }  // namespace bustub

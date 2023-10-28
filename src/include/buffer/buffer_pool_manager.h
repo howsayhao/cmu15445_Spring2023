@@ -12,6 +12,7 @@
 
 #pragma once
 
+#include <cstddef>
 #include <list>
 #include <memory>
 #include <mutex>  // NOLINT
@@ -48,10 +49,20 @@ class BufferPoolManager {
   ~BufferPoolManager();
 
   /** @brief Return the size (number of frames) of the buffer pool. */
-  auto GetPoolSize() -> size_t { return pool_size_; }
+  auto GetPoolSize() -> size_t {
+    latch_.lock();
+    size_t pool_size = pool_size_;
+    latch_.unlock();
+    return pool_size;
+  }
 
   /** @brief Return the pointer to all the pages in the buffer pool. */
-  auto GetPages() -> Page * { return pages_; }
+  auto GetPages() -> Page * {
+    latch_.lock();
+    Page *pages = pages_;
+    latch_.unlock();
+    return pages;
+  }
 
   /**
    * TODO(P1): Add implementation

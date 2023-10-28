@@ -9,12 +9,14 @@
 #include "storage/page/b_plus_tree_header_page.h"
 #include "storage/page/page_guard.h"
 
-// #define ZHHAO_P2_INSERT_DEBUG
+#define ZHHAO_P2_INSERT_DEBUG
 // #define ZHHAO_P2_REMOVE_DEBUG
 // #define ZHHAO_P2_GET_DEBUG
 // #define ZHHAO_P2_GET0_DEBUG
-#define ZHHAO_P2_INSERT0_DEBUG
+// #define ZHHAO_P2_INSERT0_DEBUG
 // #define ZHHAO_P2_ITER_DEBUG
+
+#define POSITIVE_CRAB
 
 // 10/19 这一版本准备落实一下向兄弟借以使得各结点的分担平均，这样可以
 // #1.更快的释放瓶颈锁；#2.因为测试点的数据还是偏skewed的，虽然因为进程不同步这个
@@ -144,11 +146,12 @@ auto BPLUSTREE_TYPE::Insert(const KeyType &key, const ValueType &value, Transact
 #ifdef ZHHAO_P2_INSERT0_DEBUG
   auto log = std::stringstream();
   KeyType index_1;
-  KeyType index_999;
+  // KeyType index_999;
   index_1.SetFromInteger(1);
-  index_999.SetFromInteger(999);
-  if (comparator_(key, index_1) == 0 || comparator_(key, index_999) == 0) {
-    log << "---insert---" << key << " | thread " << std::this_thread::get_id() << std::endl;
+  // index_999.SetFromInteger(999);
+  // if (comparator_(key, index_1) == 0 || comparator_(key, index_999) == 0) {
+  if (comparator_(key, index_1) == 0) {
+    log << "---insert---" << key << std::endl;
     LOG_DEBUG("%s", log.str().c_str());
   }
 #endif
@@ -160,97 +163,96 @@ auto BPLUSTREE_TYPE::Insert(const KeyType &key, const ValueType &value, Transact
   int insert_slot = -1;
 
   /* 先进行乐观螃蟹加锁部分 */
-  //   ReadPageGuard head_read_guard = bpm_->FetchPageRead(header_page_id_);
-  // #ifdef ZHHAO_P2_INSERT_DEBUG
-  //   log = std::stringstream();
-  //   log << "---insert get header for positive crab---" << key << " | thread " << std::this_thread::get_id() <<
-  //   std::endl; LOG_DEBUG("%s", log.str().c_str());
-  // #endif
-  //   auto head_read_page = head_read_guard.As<BPlusTreeHeaderPage>();
-  //   if (head_read_page->root_page_id_ != INVALID_PAGE_ID) {
-  //     ReadPageGuard read_guard = bpm_->FetchPageRead(head_read_page->root_page_id_);
-  //     WritePageGuard leaf_crab_guard;
-  //     auto curr_read_page = read_guard.template As<InternalPage>();
-  //     // 下一部分获得叶子结点的WriteGuard
-  //     if (curr_read_page->IsLeafPage()) {
-  //       read_guard.Drop();
-  //       leaf_crab_guard = bpm_->FetchPageWrite(head_read_page->root_page_id_);
-  //       head_read_guard.Drop();
-  //     } else {
-  //       head_read_guard.Drop();
-  //       KeyType vice_key;
-  //       vice_key.SetFromInteger(1);
-  //       bool already_found{false};
-  //       while (!already_found) {
-  //         int slot_num;
-  //         for (int i = 1; i < curr_read_page->GetSize(); i++) {  // 注意，这里的getsize是已经包括了空槽的了，所以<
-  //           //
-  //           代码可读比代码整洁要重要的多，这里我强行代码整合而逻辑却没有更简化，最后的结果只是平白多BUG而仅少了略微的代码冗余
-  //           if (comparator_(key, curr_read_page->KeyAt(i)) < 0 || i + 1 == curr_read_page->GetSize()) {
-  //             if (comparator_(curr_read_page->KeyAt(0), vice_key) != 0) {
-  //               slot_num =
-  //                   (i + 1 == curr_read_page->GetSize() && comparator_(key, curr_read_page->KeyAt(i)) >= 0) ? i : (i
-  //                   - 1);
-  //               read_guard = bpm_->FetchPageRead(curr_read_page->ValueAt(slot_num));
-  //               curr_read_page = read_guard.template As<InternalPage>();
-  //             } else {
-  //               slot_num =
-  //                   (i + 1 == curr_read_page->GetSize() && comparator_(key, curr_read_page->KeyAt(i)) >= 0) ? i : (i
-  //                   - 1);
-  //               leaf_crab_guard = bpm_->FetchPageWrite(curr_read_page->ValueAt(slot_num));
-  //               read_guard.Drop();
-  //               already_found = true;
-  //             }
-  //             break;
-  //           }
-  //         }
-  //       }
-  //     }
-  //     auto leaf_crab_page = leaf_crab_guard.AsMut<LeafPage>();
-  // #ifdef ZHHAO_P2_INSERT_DEBUG
-  //     log = std::stringstream();
-  //     log << "insert crab inspect: ";
-  //     log << " | thread " << std::this_thread::get_id() << std::endl;
-  //     for (int i = 0; i < leaf_crab_page->GetSize(); i++) {
-  //       log << leaf_crab_page->KeyAt(i) << ", ";
-  //     }
-  //     log << "   | page id: " << leaf_crab_guard.PageId() << "  | key: " << key << std::endl;
-  //     LOG_DEBUG("%s", log.str().c_str());
-  // #endif
-  //     for (int i = 0; i < leaf_crab_page->GetSize(); i++) {  // 先判断duplicate_key
-  //       if (comparator_(leaf_crab_page->KeyAt(i), key) == 0) {
-  // #ifdef ZHHAO_P2_INSERT_DEBUG
-  //         log = std::stringstream();
-  //         log << "---insert out,duplicate---" << key << " | thread " << std::this_thread::get_id() << std::endl;
-  //         LOG_DEBUG("%s", log.str().c_str());
-  // #endif
-  //         return false;
-  //       }
-  //     }
-  //     if (leaf_crab_page->GetSize() < leaf_crab_page->GetMaxSize()) {  // 后判断会不会有split操作，如果不会，乐观插入
-  //       for (int i = 0; i < leaf_crab_page->GetSize(); i++) {
-  //         if (comparator_(key, leaf_crab_page->KeyAt(i)) < 0 && insert_slot == -1) {
-  //           insert_slot = i;
-  //         }
-  //         if (insert_slot != -1) {
-  //           tmp = {leaf_crab_page->KeyAt(i), leaf_crab_page->ValueAt(i)};
-  //           leaf_crab_page->SetAt(i, ins.first, ins.second);
-  //           ins = tmp;
-  //         }
-  //       }
-  //       leaf_crab_page->IncreaseSize(1);
-  //       leaf_crab_page->SetAt(leaf_crab_page->GetSize() - 1, ins.first, ins.second);
-  // #ifdef ZHHAO_P2_INSERT_DEBUG
-  //       log = std::stringstream();
-  //       log << "---insert out,no split leaf---" << key << " | thread " << std::this_thread::get_id() << std::endl;
-  //       LOG_DEBUG("%s", log.str().c_str());
-  // #endif
-  //       return true;
-  //     }
-  //     leaf_crab_guard.Drop();
-  //   } else {
-  //     head_read_guard.Drop();
-  //   }
+#ifdef POSITIVE_CRAB
+  ReadPageGuard head_read_guard = bpm_->FetchPageRead(header_page_id_);
+#ifdef ZHHAO_P2_INSERT_DEBUG
+  auto log = std::stringstream();
+  log << "---insert get header for positive crab---" << key << " | thread " << std::this_thread::get_id() << std::endl;
+  LOG_DEBUG("%s", log.str().c_str());
+#endif
+  auto head_read_page = head_read_guard.As<BPlusTreeHeaderPage>();
+  if (head_read_page->root_page_id_ != INVALID_PAGE_ID) {
+    ReadPageGuard read_guard = bpm_->FetchPageRead(head_read_page->root_page_id_);
+    WritePageGuard leaf_crab_guard;
+    auto curr_read_page = read_guard.template As<InternalPage>();
+    // 下一部分获得叶子结点的WriteGuard
+    if (curr_read_page->IsLeafPage()) {
+      read_guard.Drop();
+      leaf_crab_guard = bpm_->FetchPageWrite(head_read_page->root_page_id_);
+      head_read_guard.Drop();
+    } else {
+      head_read_guard.Drop();
+      KeyType vice_key;
+      vice_key.SetFromInteger(1);
+      bool already_found{false};
+      while (!already_found) {
+        int slot_num;
+        for (int i = 1; i < curr_read_page->GetSize(); i++) {  // 注意，这里的getsize是已经包括了空槽的了，所以<
+          // 代码可读比代码整洁要重要的多，这里我强行代码整合而逻辑却没有更简化，最后的结果只是平白多BUG而仅少了略微的代码冗余
+          if (comparator_(key, curr_read_page->KeyAt(i)) < 0 || i + 1 == curr_read_page->GetSize()) {
+            if (comparator_(curr_read_page->KeyAt(0), vice_key) != 0) {
+              slot_num =
+                  (i + 1 == curr_read_page->GetSize() && comparator_(key, curr_read_page->KeyAt(i)) >= 0) ? i : (i - 1);
+              read_guard = bpm_->FetchPageRead(curr_read_page->ValueAt(slot_num));
+              curr_read_page = read_guard.template As<InternalPage>();
+            } else {
+              slot_num =
+                  (i + 1 == curr_read_page->GetSize() && comparator_(key, curr_read_page->KeyAt(i)) >= 0) ? i : (i - 1);
+              leaf_crab_guard = bpm_->FetchPageWrite(curr_read_page->ValueAt(slot_num));
+              read_guard.Drop();
+              already_found = true;
+            }
+            break;
+          }
+        }
+      }
+    }
+    auto leaf_crab_page = leaf_crab_guard.AsMut<LeafPage>();
+#ifdef ZHHAO_P2_INSERT_DEBUG
+    log = std::stringstream();
+    log << "insert crab inspect: ";
+    log << " | thread " << std::this_thread::get_id() << std::endl;
+    for (int i = 0; i < leaf_crab_page->GetSize(); i++) {
+      log << leaf_crab_page->KeyAt(i) << ", ";
+    }
+    log << "   | page id: " << leaf_crab_guard.PageId() << "  | key: " << key << std::endl;
+    LOG_DEBUG("%s", log.str().c_str());
+#endif
+    for (int i = 0; i < leaf_crab_page->GetSize(); i++) {  // 先判断duplicate_key
+      if (comparator_(leaf_crab_page->KeyAt(i), key) == 0) {
+#ifdef ZHHAO_P2_INSERT_DEBUG
+        log = std::stringstream();
+        log << "---insert out,duplicate---" << key << " | thread " << std::this_thread::get_id() << std::endl;
+        LOG_DEBUG("%s", log.str().c_str());
+#endif
+        return false;
+      }
+    }
+    if (leaf_crab_page->GetSize() < leaf_crab_page->GetMaxSize()) {  // 后判断会不会有split操作，如果不会，乐观插入
+      for (int i = 0; i < leaf_crab_page->GetSize(); i++) {
+        if (comparator_(key, leaf_crab_page->KeyAt(i)) < 0 && insert_slot == -1) {
+          insert_slot = i;
+        }
+        if (insert_slot != -1) {
+          tmp = {leaf_crab_page->KeyAt(i), leaf_crab_page->ValueAt(i)};
+          leaf_crab_page->SetAt(i, ins.first, ins.second);
+          ins = tmp;
+        }
+      }
+      leaf_crab_page->IncreaseSize(1);
+      leaf_crab_page->SetAt(leaf_crab_page->GetSize() - 1, ins.first, ins.second);
+#ifdef ZHHAO_P2_INSERT_DEBUG
+      log = std::stringstream();
+      log << "---insert out,no split leaf---" << key << " | thread " << std::this_thread::get_id() << std::endl;
+      LOG_DEBUG("%s", log.str().c_str());
+#endif
+      return true;
+    }
+    leaf_crab_guard.Drop();
+  } else {
+    head_read_guard.Drop();
+  }
+#endif
 
   /* 之后是非改进版的螃蟹锁策略 */
   WritePageGuard head_write_guard = bpm_->FetchPageWrite(header_page_id_);

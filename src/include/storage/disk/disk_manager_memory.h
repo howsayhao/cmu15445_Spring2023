@@ -74,6 +74,7 @@ class DiskManagerUnlimitedMemory : public DiskManager {
     if (latency_ > 0) {
       std::this_thread::sleep_for(std::chrono::milliseconds(latency_));
     }
+    // std::cout << "write latency:  " << latency_ << std::endl;
 
     std::unique_lock<std::mutex> l(mutex_);
     if (page_id >= static_cast<int>(data_.size())) {
@@ -98,6 +99,7 @@ class DiskManagerUnlimitedMemory : public DiskManager {
     if (latency_ > 0) {
       std::this_thread::sleep_for(std::chrono::milliseconds(latency_));
     }
+    // std::cout << "read latency:  " << latency_ << std::endl;
 
     std::unique_lock<std::mutex> l(mutex_);
     if (page_id >= static_cast<int>(data_.size()) || page_id < 0) {

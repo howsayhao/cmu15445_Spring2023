@@ -353,10 +353,11 @@ TEST(BPlusTreeConcurrentTest, Concurrent_InsertTest2) {
     BPlusTree<GenericKey<8>, RID, GenericComparator<8>> tree("foo_pk", header_page->GetPageId(), bpm, comparator,
                                                              leaf_size, internal_size);
     auto rng = std::default_random_engine{};
+    std::shuffle(keys.begin(), keys.end(), rng);
 
     LaunchParallelTest(thread_nums, InsertHelperSplit, &tree, keys, thread_nums);
     std::cout << "-----------------------------------------" << std::endl;
-    // tree.Draw(bpm, filename);
+    tree.Draw(bpm, filename);
     std::vector<RID> rids;
     GenericKey<8> index_key;
     for (auto key : keys) {
