@@ -9,7 +9,7 @@
 #include "storage/page/b_plus_tree_header_page.h"
 #include "storage/page/page_guard.h"
 
-#define ZHHAO_P2_INSERT_DEBUG
+// #define ZHHAO_P2_INSERT_DEBUG
 // #define ZHHAO_P2_REMOVE_DEBUG
 // #define ZHHAO_P2_GET_DEBUG
 // #define ZHHAO_P2_GET0_DEBUG
@@ -257,7 +257,7 @@ auto BPLUSTREE_TYPE::Insert(const KeyType &key, const ValueType &value, Transact
   /* 之后是非改进版的螃蟹锁策略 */
   WritePageGuard head_write_guard = bpm_->FetchPageWrite(header_page_id_);
 #ifdef ZHHAO_P2_INSERT_DEBUG
-  log = std::stringstream();
+  auto log = std::stringstream();
   log << "---insert get header for empty judge---" << key << " | thread " << std::this_thread::get_id() << std::endl;
   LOG_DEBUG("%s", log.str().c_str());
 #endif
@@ -314,57 +314,58 @@ auto BPLUSTREE_TYPE::Insert(const KeyType &key, const ValueType &value, Transact
     curr_page = guard.template AsMut<InternalPage>();
     if (curr_page->GetSize() < curr_page->GetMaxSize()) {  // 此时ctx.write_set_中必然至少有一个父亲结点
       ctx.write_set_.clear();
-    } else if (!curr_page
-                    ->IsLeafPage()) {  // 此处对内部结点进行负载均衡操作，因为测试倾斜向大的缘故，优先向左兄弟分担均衡
-      // 因为兄弟一般也都只有最多2个位子的空余，所以并不需要刻意比较哪个兄弟更富裕(代码复杂些)，一般而言左兄弟更富裕，因为右兄弟一般都是左兄弟分裂而来的
-      // 而且即便接下来马上要插入左兄弟了，最差的情况左兄弟也要分裂，那么也只是要封住那个瓶颈，当然多了以下管理负载均衡的开销
-      if (i != 1) {  // 有左兄弟
-        auto parent_page = ctx.write_set_.back().AsMut<InternalPage>();
-        WritePageGuard lsibling_guard =
-            bpm_->FetchPageWrite(parent_page->ValueAt(i - 2));  // 主要在于这个的开销其实比较大
-        auto lsibling_page = lsibling_guard.AsMut<InternalPage>();
-        if (lsibling_page->GetSize() < lsibling_page->GetMaxSize()) {  // 可向左兄弟进行负载均衡
-          int whole_size = lsibling_page->GetSize() + curr_page->GetSize();
-          int avg_size = whole_size / 2;  // 这个理论上会小一点，留给自己，否则有些情况等于白负载均衡了
-          int left_size = whole_size - avg_size;
-          int init_lsibling_size = lsibling_page->GetSize();
-          int init_rsibling_size = curr_page->GetSize();
-          int diff_size = init_rsibling_size - avg_size;
-          for (int j = init_lsibling_size; j < left_size; j++) {  // 对左兄弟进行负载分配
-            lsibling_page->IncreaseSize(1);
-            lsibling_page->SetValueAt(j, curr_page->ValueAt(j - init_lsibling_size));
-            if (j == init_lsibling_size) {  // 首个key结点应该借用父亲结点的相应值，而父亲结点的该值由之后右结点填充
-              lsibling_page->SetKeyAt(j, parent_page->KeyAt(i - 1));
-            } else {  // 也就是平行地移动，只不过key(0)没有意义所以第一次由父亲结点的key填充
-              lsibling_page->SetKeyAt(j, curr_page->KeyAt(j - init_lsibling_size));
-            }
-          }
-          parent_page->SetKeyAt(i - 1,
-                                curr_page->KeyAt(diff_size));  // 一定会有对左兄弟的分担，所以父结点一定需要填充恢复
-          int j = diff_size + 1;
-          for (; j < init_rsibling_size; j++) {
-            // 倾斜式地赋值，保留key(0)的信息
-            curr_page->SetKeyAt(j - diff_size, curr_page->KeyAt(j));
-            curr_page->SetValueAt(j - diff_size - 1, curr_page->ValueAt(j - 1));
-          }
-          // 最后一个结点需要将其下属的value也移过去
-          curr_page->SetValueAt(init_rsibling_size - diff_size - 1, curr_page->ValueAt(init_rsibling_size - 1));
-          curr_page->IncreaseSize(-diff_size);
-          if (comparator_(key, parent_page->KeyAt(i - 1)) < 0) {  // 如果分摊负载之后被索引到负担变重的左结点了
-            // 那反正不这样处理右结点也会被分裂，所以影响应该不太大，之后的skewed数据也是一样处理，只不过多了管理开销了
-            if (lsibling_page->GetSize() < lsibling_page->GetMaxSize()) {
-              ctx.write_set_.clear();
-            }
-            curr_page = lsibling_guard.template AsMut<InternalPage>();
-            ctx.write_set_.push_back(std::move(lsibling_guard));
-            continue;
-          }
-          // 否则的话因为右结点刚刚减轻负担过，所以不会分裂，那么可以释放父亲结点
-          ctx.write_set_.clear();
-        }
-      }
-    }
-    ctx.write_set_.push_back(std::move(guard));
+    } 
+  // else if (!curr_page
+    //                 ->IsLeafPage()) {  // 此处对内部结点进行负载均衡操作，因为测试倾斜向大的缘故，优先向左兄弟分担均衡
+    //   // 因为兄弟一般也都只有最多2个位子的空余，所以并不需要刻意比较哪个兄弟更富裕(代码复杂些)，一般而言左兄弟更富裕，因为右兄弟一般都是左兄弟分裂而来的
+    //   // 而且即便接下来马上要插入左兄弟了，最差的情况左兄弟也要分裂，那么也只是要封住那个瓶颈，当然多了以下管理负载均衡的开销
+    //   if (i != 1) {  // 有左兄弟
+    //     auto parent_page = ctx.write_set_.back().AsMut<InternalPage>();
+    //     WritePageGuard lsibling_guard =
+    //         bpm_->FetchPageWrite(parent_page->ValueAt(i - 2));  // 主要在于这个的开销其实比较大
+    //     auto lsibling_page = lsibling_guard.AsMut<InternalPage>();
+    //     if (lsibling_page->GetSize() < lsibling_page->GetMaxSize()) {  // 可向左兄弟进行负载均衡
+    //       int whole_size = lsibling_page->GetSize() + curr_page->GetSize();
+    //       int avg_size = whole_size / 2;  // 这个理论上会小一点，留给自己，否则有些情况等于白负载均衡了
+    //       int left_size = whole_size - avg_size;
+    //       int init_lsibling_size = lsibling_page->GetSize();
+    //       int init_rsibling_size = curr_page->GetSize();
+    //       int diff_size = init_rsibling_size - avg_size;
+    //       for (int j = init_lsibling_size; j < left_size; j++) {  // 对左兄弟进行负载分配
+    //         lsibling_page->IncreaseSize(1);
+    //         lsibling_page->SetValueAt(j, curr_page->ValueAt(j - init_lsibling_size));
+    //         if (j == init_lsibling_size) {  // 首个key结点应该借用父亲结点的相应值，而父亲结点的该值由之后右结点填充
+    //           lsibling_page->SetKeyAt(j, parent_page->KeyAt(i - 1));
+    //         } else {  // 也就是平行地移动，只不过key(0)没有意义所以第一次由父亲结点的key填充
+    //           lsibling_page->SetKeyAt(j, curr_page->KeyAt(j - init_lsibling_size));
+    //         }
+    //       }
+    //       parent_page->SetKeyAt(i - 1,
+    //                             curr_page->KeyAt(diff_size));  // 一定会有对左兄弟的分担，所以父结点一定需要填充恢复
+    //       int j = diff_size + 1;
+    //       for (; j < init_rsibling_size; j++) {
+    //         // 倾斜式地赋值，保留key(0)的信息
+    //         curr_page->SetKeyAt(j - diff_size, curr_page->KeyAt(j));
+    //         curr_page->SetValueAt(j - diff_size - 1, curr_page->ValueAt(j - 1));
+    //       }
+    //       // 最后一个结点需要将其下属的value也移过去
+    //       curr_page->SetValueAt(init_rsibling_size - diff_size - 1, curr_page->ValueAt(init_rsibling_size - 1));
+    //       curr_page->IncreaseSize(-diff_size);
+    //       if (comparator_(key, parent_page->KeyAt(i - 1)) < 0) {  // 如果分摊负载之后被索引到负担变重的左结点了
+    //         // 那反正不这样处理右结点也会被分裂，所以影响应该不太大，之后的skewed数据也是一样处理，只不过多了管理开销了
+    //         if (lsibling_page->GetSize() < lsibling_page->GetMaxSize()) {
+    //           ctx.write_set_.clear();
+    //         }
+    //         curr_page = lsibling_guard.template AsMut<InternalPage>();
+    //         ctx.write_set_.push_back(std::move(lsibling_guard));
+    //         continue;
+    //       }
+        //   // 否则的话因为右结点刚刚减轻负担过，所以不会分裂，那么可以释放父亲结点
+        //   ctx.write_set_.clear();
+        // }
+      // }
+    // }
+  ctx.write_set_.push_back(std::move(guard));
   }
   auto leaf_guard =
       std::move(ctx.write_set_.back());  // 下面两行注释掉的是有问题的
