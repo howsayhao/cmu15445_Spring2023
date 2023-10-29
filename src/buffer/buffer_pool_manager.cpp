@@ -72,17 +72,17 @@ auto BufferPoolManager::NewPage(page_id_t *page_id, AccessType access_type) -> P
   } else {
     frame_to_set = this->free_list_.front();
     free_list_.pop_front();
-    list_latch_.unlock();
+
   }
+  // 更新在LRUK-Replacer中的记录信息
+  replacer_->RecordAccess(frame_to_set);
+  replacer_->SetEvictable(frame_to_set, false);
   // 都要对新的page的meta信息做初始化
   *page_id = AllocatePage();
   pages_[frame_to_set].is_dirty_ = false;
   pages_[frame_to_set].page_id_ = *page_id;
   pages_[frame_to_set].pin_count_ = 1;
   page_table_.insert(std::make_pair(*page_id, frame_to_set));
-  // 更新在LRUK-Replacer中的记录信息
-  replacer_->RecordAccess(frame_to_set);
-  replacer_->SetEvictable(frame_to_set, false);
   // PROJ_2#2，DEBUG_LOG
   // 这一处的逻辑是这样的，如果没有这个，因为会出现还没有来得及对某page做修改就因为evictable被驱逐了，此时
     // 有个进程会要去用这个page，已知page id，但没有写回则disk_manager不认为自己分配了该page，会报错，返回空数据
@@ -99,6 +99,7 @@ auto BufferPoolManager::NewPage(page_id_t *page_id, AccessType access_type) -> P
   if (access_type == AccessType::Scan) {
     pages_[frame_to_set].WLatch();
   }
+  frame_latch_[frame_to_set].lock();
   disk_latch_.lock();
   latch_.unlock();
 
@@ -107,6 +108,7 @@ auto BufferPoolManager::NewPage(page_id_t *page_id, AccessType access_type) -> P
     disk_manager_->WritePage(dirty_page_id, pages_[frame_to_set].GetData());
   }
   disk_latch_.unlock();
+  frame_latch_[frame_to_set].unlock();
 
   return return_page;
 }
@@ -135,6 +137,8 @@ auto BufferPoolManager::FetchPage(page_id_t page_id, [[maybe_unused]] AccessType
       free_list_.pop_front();
     }
     page_table_.insert(std::make_pair(page_id, frame_to_fetch));  // 得到frame后，马上装载进pgtbl里
+    replacer_->RecordAccess(frame_to_fetch);
+    replacer_->SetEvictable(frame_to_fetch, false);
   } else {  // 是在原已有的page上读入，那么没有必要清除这个frame的history
     frame_to_fetch = page_table_.at(page_id);
     auto fetch_page = &pages_[frame_to_fetch];
@@ -142,14 +146,17 @@ auto BufferPoolManager::FetchPage(page_id_t page_id, [[maybe_unused]] AccessType
     replacer_->SetEvictable(frame_to_fetch, false);
     pages_[frame_to_fetch].pin_count_++;
     latch_.unlock();
+    // pages_[frame_to_fetch].pin_count_++;
     if (access_type == AccessType::Get) {
       fetch_page->RLatch();
     } else if (access_type == AccessType::Scan) {
       fetch_page->WLatch();
     }
+    frame_latch_[frame_to_fetch].lock();
+    frame_latch_[frame_to_fetch].unlock();
     // 上面两个并不能够实现对数据内容的完全隔离
-    disk_latch_.lock();
-    disk_latch_.unlock();
+    // disk_latch_.lock();
+    // disk_latch_.unlock();
     return fetch_page;
   }
   // 不管是哪种情况，现在已经得到了frame_to_fetch，并都载入了pgtbl，且得到了一个已有数据的page，需要对page的meta
@@ -165,23 +172,23 @@ auto BufferPoolManager::FetchPage(page_id_t page_id, [[maybe_unused]] AccessType
   pages_[frame_to_fetch].is_dirty_ = false;
 
   // disk_manager_->ReadPage(page_id, pages_[frame_to_fetch].GetData());
-  replacer_->RecordAccess(frame_to_fetch);
-  replacer_->SetEvictable(frame_to_fetch, false);
 
   if (access_type == AccessType::Get) {
     fetch_page->RLatch();
   } else if (access_type == AccessType::Scan) {
     fetch_page->WLatch();
   }
-
+  frame_latch_[frame_to_fetch].lock();
   disk_latch_.lock();
   latch_.unlock();
 
+  // disk_latch_.lock();
   if (dirty_flag) {
     disk_manager_->WritePage(dirty_page_id, pages_[frame_to_fetch].GetData());
   }
   disk_manager_->ReadPage(page_id, pages_[frame_to_fetch].GetData());
   disk_latch_.unlock();
+  frame_latch_[frame_to_fetch].unlock();
 
   return fetch_page;
 }

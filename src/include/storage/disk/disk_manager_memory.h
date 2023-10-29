@@ -128,7 +128,7 @@ class DiskManagerUnlimitedMemory : public DiskManager {
   using Page = std::array<char, BUSTUB_PAGE_SIZE>;
   using ProtectedPage = std::pair<Page, std::shared_mutex>;
   std::vector<std::shared_ptr<ProtectedPage>> data_;
-  size_t latency_{0};
+  size_t latency_{5};
 };
 
 }  // namespace bustub
