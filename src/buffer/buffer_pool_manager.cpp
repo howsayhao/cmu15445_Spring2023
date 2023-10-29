@@ -59,9 +59,10 @@ auto BufferPoolManager::NewPage(page_id_t *page_id, AccessType access_type) -> P
   if (free_list_.empty()) {  // 没有空的frame了，需要找Replacer腾出空间
     if (replacer_->Evict(&frame_to_set)) {  // 若成功则说明是处于UnPin的状态，即evictable // 只有各个线程对该page/frame
                                             // unpin才允许evict
-      page_table_.erase(pages_[frame_to_set].GetPageId());
+      dirty_page_id = pages_[frame_to_set].GetPageId();
+      page_table_.erase(dirty_page_id);
       if (pages_[frame_to_set].IsDirty()) {
-        dirty_page_id = pages_[frame_to_set].GetPageId();
+        // dirty_page_id = pages_[frame_to_set].GetPageId();
         dirty_flag = true;
         // disk_manager_->WritePage(pages_[frame_to_set].GetPageId(), pages_[frame_to_set].GetData());
       }
@@ -72,7 +73,6 @@ auto BufferPoolManager::NewPage(page_id_t *page_id, AccessType access_type) -> P
   } else {
     frame_to_set = this->free_list_.front();
     free_list_.pop_front();
-
   }
   // 更新在LRUK-Replacer中的记录信息
   replacer_->RecordAccess(frame_to_set);
@@ -85,14 +85,14 @@ auto BufferPoolManager::NewPage(page_id_t *page_id, AccessType access_type) -> P
   page_table_.insert(std::make_pair(*page_id, frame_to_set));
   // PROJ_2#2，DEBUG_LOG
   // 这一处的逻辑是这样的，如果没有这个，因为会出现还没有来得及对某page做修改就因为evictable被驱逐了，此时
-    // 有个进程会要去用这个page，已知page id，但没有写回则disk_manager不认为自己分配了该page，会报错，返回空数据
-    // 但返回空数据本身没有影响，因为逻辑上还没有修改过的数据返回空数据也符合预期，这也是为什么虽然报错但基本的查询结果都没问题
-    // 分析：我在b_plus_tree的实现中，在获取新page时为NewPageGuarded; guard =
-    // FetchGuarded;前者是有返回值的，但我没有绑定变量
-    // 这使得新New的guard遵循RAII设计自主释放了，因而可以被驱逐；所以我再接着想fetch时就可能会得到空数据；
-    // 可如果仅仅是这个，问题貌似不是太大，无非是爆一些warning而已
-    // 正常的写回没有问题，因为我b_plus_tree是唯一使用并调用page的应用层，而每次调用page我都有AsMut，所以脏位设置应该没有遗漏
-    // disk_manager_->WritePage(*page_id, pages_[frame_to_set].GetData());
+  // 有个进程会要去用这个page，已知page id，但没有写回则disk_manager不认为自己分配了该page，会报错，返回空数据
+  // 但返回空数据本身没有影响，因为逻辑上还没有修改过的数据返回空数据也符合预期，这也是为什么虽然报错但基本的查询结果都没问题
+  // 分析：我在b_plus_tree的实现中，在获取新page时为NewPageGuarded; guard =
+  // FetchGuarded;前者是有返回值的，但我没有绑定变量
+  // 这使得新New的guard遵循RAII设计自主释放了，因而可以被驱逐；所以我再接着想fetch时就可能会得到空数据；
+  // 可如果仅仅是这个，问题貌似不是太大，无非是爆一些warning而已
+  // 正常的写回没有问题，因为我b_plus_tree是唯一使用并调用page的应用层，而每次调用page我都有AsMut，所以脏位设置应该没有遗漏
+  // disk_manager_->WritePage(*page_id, pages_[frame_to_set].GetData());
 
   auto return_page = &pages_[frame_to_set];
 
@@ -131,7 +131,8 @@ auto BufferPoolManager::FetchPage(page_id_t page_id, [[maybe_unused]] AccessType
   if (page_table_.find(page_id) == page_table_.end()) {  // 尚未装载到pgtbl中，因为没有对应的frame给到这个page_id
     if (free_list_.empty()) {                            // 要么是需要踢出一些frame的
       replacer_->Evict(&frame_to_fetch);
-      page_table_.erase(pages_[frame_to_fetch].GetPageId());
+      dirty_page_id = pages_[frame_to_fetch].GetPageId();
+      page_table_.erase(dirty_page_id);
     } else {  // 要么是free_list里frame还有没用的
       frame_to_fetch = free_list_.front();
       free_list_.pop_front();
@@ -164,7 +165,7 @@ auto BufferPoolManager::FetchPage(page_id_t page_id, [[maybe_unused]] AccessType
   auto fetch_page = &pages_[frame_to_fetch];
   if (pages_[frame_to_fetch].IsDirty()) {
     dirty_flag = true;
-    dirty_page_id = pages_[frame_to_fetch].GetPageId();
+    // dirty_page_id = pages_[frame_to_fetch].GetPageId();
     // disk_manager_->WritePage(pages_[frame_to_fetch].GetPageId(), pages_[frame_to_fetch].GetData());  //
   }
   pages_[frame_to_fetch].pin_count_ = 1;

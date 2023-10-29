@@ -8,13 +8,14 @@
 #include "common/rid.h"
 #include "storage/index/b_plus_tree.h"
 #include "storage/page/b_plus_tree_header_page.h"
+#include "storage/page/b_plus_tree_page.h"
 #include "storage/page/page_guard.h"
 
 // #define ZHHAO_P2_INSERT_DEBUG
 // #define ZHHAO_P2_REMOVE_DEBUG
 // #define ZHHAO_P2_GET_DEBUG
 // #define ZHHAO_P2_GET0_DEBUG
-// #define ZHHAO_P2_INSERT0_DEBUG
+#define ZHHAO_P2_INSERT0_DEBUG
 // #define ZHHAO_P2_ITER_DEBUG
 
 #define POSITIVE_CRAB
@@ -98,16 +99,9 @@ auto BPLUSTREE_TYPE::GetValue(const KeyType &key, std::vector<ValueType> *result
   head_guard.Drop();
   auto curr_page = guard.template As<BPlusTreePage>();
   while (!curr_page->IsLeafPage()) {
-    auto internal_page = reinterpret_cast<const InternalPage *>(curr_page);
-    for (int i = 1; i < internal_page->GetSize(); i++) {  // 注意，这里的getsize是已经包括了空槽的了，所以<
-      if (comparator_(key, internal_page->KeyAt(i)) < 0) {
-        guard = bpm_->FetchPageRead(internal_page->ValueAt(i - 1));
-        break;
-      }
-      if (i + 1 == internal_page->GetSize()) {  // 取最后一个child node
-        guard = bpm_->FetchPageRead(internal_page->ValueAt(i));
-      }
-    }
+    int slot_num = GetSlotNum(key, curr_page, true);
+    // auto internal_page = reinterpret_cast<const InternalPage *>(curr_page);
+    guard = bpm_->FetchPageRead(reinterpret_cast<const InternalPage *>(curr_page)->ValueAt(slot_num));
 #ifdef ZHHAO_P2_GET_DEBUG
     log = std::stringstream();
     log << "get PageId: " << guard.PageId() << " | thread " << std::this_thread::get_id() << std::endl;
@@ -118,18 +112,17 @@ auto BPLUSTREE_TYPE::GetValue(const KeyType &key, std::vector<ValueType> *result
   auto *leaf_page = reinterpret_cast<const LeafPage *>(curr_page);
 
   // 找到叶子结点后判断是否有对应Key;
-  for (int i = 0; i < leaf_page->GetSize(); i++) {
-    if (comparator_(key, leaf_page->KeyAt(i)) == 0) {
-      (*result).push_back(leaf_page->ValueAt(i));
-      return true;
-    }
+  int slot_num = GetSlotNum(key, leaf_page, false);
+  if (slot_num != -1) {
+    result->push_back(leaf_page->ValueAt(slot_num));
+    return true;
   }
+  return false;
 #ifdef ZHHAO_P2_GET_DEBUG
   log = std::stringstream();
   log << "---get can not found---" << key << " | thread " << std::this_thread::get_id() << std::endl;
   LOG_DEBUG("%s", log.str().c_str());
 #endif
-  return false;
 }
 
 /*****************************************************************************
@@ -143,15 +136,61 @@ auto BPLUSTREE_TYPE::GetValue(const KeyType &key, std::vector<ValueType> *result
  * keys return false, otherwise return true.
  */
 INDEX_TEMPLATE_ARGUMENTS
+auto BPLUSTREE_TYPE::GetSlotNum(const KeyType &key, const BPlusTreePage *bp_page, bool type) -> int {
+  if (!type) {  // 叶子结点
+    auto leaf_page = reinterpret_cast<const LeafPage *>(bp_page);
+    int start = 0;
+    int end = leaf_page->GetSize() - 1;
+    while (start <= end) {
+      int slot_num = (start + end) / 2;
+      int val = comparator_(key, leaf_page->KeyAt(slot_num));
+      if (val == 0) {
+        return slot_num;
+      } 
+      if (val > 0) {
+        start = slot_num + 1;
+      } else {
+        end = slot_num - 1;
+      }
+    }
+  } else {  // 内部结点
+    auto internal_page = reinterpret_cast<const InternalPage *>(bp_page);
+    int start = 1;
+    int end = internal_page->GetSize() - 1;
+    while (start <= end) {
+      int slot_num = (start + end) / 2;
+      if (comparator_(key, internal_page->KeyAt(slot_num)) < 0) {
+        if (slot_num == start) {
+          return start - 1;
+        }
+        if (comparator_(key, internal_page->KeyAt(slot_num-1)) >= 0) {
+          return slot_num - 1;
+        }
+        end = slot_num - 1;
+      } else {
+        if (slot_num == end) {
+          return end;
+        }
+        if (comparator_(key, internal_page->KeyAt(slot_num+1)) < 0) {
+          return slot_num;
+        }
+        start = slot_num + 1;
+      }
+    }
+  }
+  return -1;  // 代表没有找到，仅叶子结点会有这种情况
+}
+
+INDEX_TEMPLATE_ARGUMENTS
 auto BPLUSTREE_TYPE::Insert(const KeyType &key, const ValueType &value, Transaction *txn) -> bool {
 #ifdef ZHHAO_P2_INSERT0_DEBUG
-  auto log = std::stringstream();
   KeyType index_1;
   // KeyType index_999;
   index_1.SetFromInteger(1);
   // index_999.SetFromInteger(999);
   // if (comparator_(key, index_1) == 0 || comparator_(key, index_999) == 0) {
   if (comparator_(key, index_1) == 0) {
+    auto log = std::stringstream();
     log << "---insert---" << key << std::endl;
     LOG_DEBUG("%s", log.str().c_str());
   }
@@ -187,24 +226,14 @@ auto BPLUSTREE_TYPE::Insert(const KeyType &key, const ValueType &value, Transact
       vice_key.SetFromInteger(1);
       bool already_found{false};
       while (!already_found) {
-        int slot_num;
-        for (int i = 1; i < curr_read_page->GetSize(); i++) {  // 注意，这里的getsize是已经包括了空槽的了，所以<
-          // 代码可读比代码整洁要重要的多，这里我强行代码整合而逻辑却没有更简化，最后的结果只是平白多BUG而仅少了略微的代码冗余
-          if (comparator_(key, curr_read_page->KeyAt(i)) < 0 || i + 1 == curr_read_page->GetSize()) {
-            if (comparator_(curr_read_page->KeyAt(0), vice_key) != 0) {
-              slot_num =
-                  (i + 1 == curr_read_page->GetSize() && comparator_(key, curr_read_page->KeyAt(i)) >= 0) ? i : (i - 1);
-              read_guard = bpm_->FetchPageRead(curr_read_page->ValueAt(slot_num));
-              curr_read_page = read_guard.template As<InternalPage>();
-            } else {
-              slot_num =
-                  (i + 1 == curr_read_page->GetSize() && comparator_(key, curr_read_page->KeyAt(i)) >= 0) ? i : (i - 1);
-              leaf_crab_guard = bpm_->FetchPageWrite(curr_read_page->ValueAt(slot_num));
-              read_guard.Drop();
-              already_found = true;
-            }
-            break;
-          }
+        int slot_num = GetSlotNum(key, curr_read_page, true);
+        if (comparator_(curr_read_page->KeyAt(0), vice_key) != 0) {
+          read_guard = bpm_->FetchPageRead(curr_read_page->ValueAt(slot_num));
+          curr_read_page = read_guard.template As<InternalPage>();
+        } else {
+          leaf_crab_guard = bpm_->FetchPageWrite(curr_read_page->ValueAt(slot_num));
+          read_guard.Drop();
+          already_found = true;
         }
       }
     }
@@ -219,15 +248,18 @@ auto BPLUSTREE_TYPE::Insert(const KeyType &key, const ValueType &value, Transact
     log << "   | page id: " << leaf_crab_guard.PageId() << "  | key: " << key << std::endl;
     LOG_DEBUG("%s", log.str().c_str());
 #endif
-    for (int i = 0; i < leaf_crab_page->GetSize(); i++) {  // 先判断duplicate_key
-      if (comparator_(leaf_crab_page->KeyAt(i), key) == 0) {
-#ifdef ZHHAO_P2_INSERT_DEBUG
-        log = std::stringstream();
-        log << "---insert out,duplicate---" << key << " | thread " << std::this_thread::get_id() << std::endl;
-        LOG_DEBUG("%s", log.str().c_str());
-#endif
-        return false;
-      }
+//     for (int i = 0; i < leaf_crab_page->GetSize(); i++) {  // 先判断duplicate_key
+//       if (comparator_(leaf_crab_page->KeyAt(i), key) == 0) {
+// #ifdef ZHHAO_P2_INSERT_DEBUG
+//         log = std::stringstream();
+//         log << "---insert out,duplicate---" << key << " | thread " << std::this_thread::get_id() << std::endl;
+//         LOG_DEBUG("%s", log.str().c_str());
+// #endif
+//         return false;
+//       }
+//     }
+    if (GetSlotNum(key, leaf_crab_page, false) != -1) {
+      return false;
     }
     if (leaf_crab_page->GetSize() < leaf_crab_page->GetMaxSize()) {  // 后判断会不会有split操作，如果不会，乐观插入
       for (int i = 0; i < leaf_crab_page->GetSize(); i++) {
@@ -272,8 +304,8 @@ auto BPLUSTREE_TYPE::Insert(const KeyType &key, const ValueType &value, Transact
     root_header_page->root_page_id_ = root_page_id;
     head_write_guard.Drop();
     auto root_page = root_guard.template AsMut<LeafPage>();
-    root_page->Init();
-    root_page->SetMaxSize(leaf_max_size_);
+    root_page->Init(leaf_max_size_);
+    // root_page->SetMaxSize(leaf_max_size_);
     root_page->IncreaseSize(1);
     root_page->SetAt(0, key, value);
 #ifdef ZHHAO_P2_INSERT_DEBUG
@@ -305,16 +337,8 @@ auto BPLUSTREE_TYPE::Insert(const KeyType &key, const ValueType &value, Transact
   ctx.write_set_.push_back(std::move(root_guard));
   while (!curr_page->IsLeafPage()) {
     WritePageGuard guard;
-    int i = 1;
-    for (; i < curr_page->GetSize(); i++) {  // 注意，这里的getsize是已经包括了空槽的了，所以<
-      if (comparator_(key, curr_page->KeyAt(i)) < 0) {
-        guard = bpm_->FetchPageWrite(curr_page->ValueAt(i - 1));
-        break;
-      }
-      if (i + 1 == curr_page->GetSize()) {  // 取最后一个child node
-        guard = bpm_->FetchPageWrite(curr_page->ValueAt(i));
-      }
-    }
+    int slot_num = GetSlotNum(key, curr_page, true);
+    guard = bpm_->FetchPageWrite(curr_page->ValueAt(slot_num));
     curr_page = guard.template AsMut<InternalPage>();
     if (curr_page->GetSize() < curr_page->GetMaxSize()) {  // 此时ctx.write_set_中必然至少有一个父亲结点
       ctx.write_set_.clear();
@@ -368,8 +392,8 @@ auto BPLUSTREE_TYPE::Insert(const KeyType &key, const ValueType &value, Transact
     //         ctx.write_set_.push_back(std::move(lsibling_guard));
     //         continue;
     //       }
-    //   // 否则的话因为右结点刚刚减轻负担过，所以不会分裂，那么可以释放父亲结点
-    //     ctx.write_set_.clear();
+    //       // 否则的话因为右结点刚刚减轻负担过，所以不会分裂，那么可以释放父亲结点
+    //       ctx.write_set_.clear();
     //     }
     //   }
     // }
@@ -405,15 +429,8 @@ auto BPLUSTREE_TYPE::Insert(const KeyType &key, const ValueType &value, Transact
 #endif
 
   // 还需要再判断，因为可能看的时候是满的，但经过前面的处理后又空了
-  for (int i = 0; i < leaf_page->GetSize(); i++) {  // 先判断duplicate_key
-    if (comparator_(leaf_page->KeyAt(i), key) == 0) {
-#ifdef ZHHAO_P2_INSERT_DEBUG
-      log = std::stringstream();
-      log << "---insert out,duplicate2---" << key << " | thread " << std::this_thread::get_id() << std::endl;
-      LOG_DEBUG("%s", log.str().c_str());
-#endif
-      return false;
-    }
+  if (GetSlotNum(key, leaf_page, false) != -1) {
+    return false;
   }
   if (leaf_page->GetSize() < leaf_page->GetMaxSize()) {  // 后判断会不会有split操作
     for (int i = 0; i < leaf_page->GetSize(); i++) {
@@ -447,8 +464,8 @@ auto BPLUSTREE_TYPE::Insert(const KeyType &key, const ValueType &value, Transact
   // tmp_pin_guard.Drop();
   BasicPageGuard split_guard = bpm_->NewPageGuarded(&split_page_id, AccessType::Scan);
   auto split_leaf_page = split_guard.template AsMut<LeafPage>();
-  split_leaf_page->Init();
-  split_leaf_page->SetMaxSize(leaf_max_size_);
+  split_leaf_page->Init(leaf_max_size_);
+  // split_leaf_page->SetMaxSize(leaf_max_size_);
   split_leaf_page->SetSize((leaf_page->GetMaxSize() + 1) - (leaf_page->GetMaxSize() + 1) / 2);
   for (int i = 0; i < leaf_page->GetMaxSize(); i++) {
     if (comparator_(key, leaf_page->KeyAt(i)) < 0 && insert_slot == -1) {
@@ -495,8 +512,8 @@ auto BPLUSTREE_TYPE::Insert(const KeyType &key, const ValueType &value, Transact
     orign_page_id = parent_guard.PageId();
     auto parent_page = parent_guard.template AsMut<InternalPage>();
     auto split_page = split_guard.template AsMut<InternalPage>();
-    split_page->Init();
-    split_page->SetMaxSize(internal_max_size_);
+    split_page->Init(internal_max_size_);
+    // split_page->SetMaxSize(internal_max_size_);
     split_page->SetSize((parent_page->GetMaxSize() + 1) - (parent_page->GetMaxSize() / 2 + 1) - 1 + 1);
     int insert_slot = -1;
     KeyType ktmp;
@@ -578,8 +595,8 @@ auto BPLUSTREE_TYPE::Insert(const KeyType &key, const ValueType &value, Transact
     // tmp_pin_guard.Drop();  // 保护frame slot的任务已经完成了，需要把额外的那份pin给取消掉
     ctx.write_set_.front().Drop();
     auto root_page = guard.template AsMut<InternalPage>();
-    root_page->Init();
-    root_page->SetMaxSize(internal_max_size_);
+    root_page->Init(internal_max_size_);
+    // root_page->SetMaxSize(internal_max_size_);
     root_page->IncreaseSize(1);
     root_page->SetKeyAt(1, split_key);
     root_page->SetValueAt(1, split_page_id);
@@ -605,26 +622,15 @@ auto BPLUSTREE_TYPE::Insert(const KeyType &key, const ValueType &value, Transact
   auto parent_page = parent_guard.template AsMut<InternalPage>();
   ctx.write_set_.pop_back();
   KeyType kins = split_key;
-  KeyType ktmp;
   page_id_t pins = split_page_id;
-  page_id_t ptmp;
-  insert_slot = -1;
-  for (int i = 1; i < parent_page->GetSize(); i++) {
-    if (comparator_(split_key, parent_page->KeyAt(i)) < 0 && insert_slot == -1) {  // 找到槽位
-      insert_slot = i;
-    }
-    if (insert_slot != -1) {  // 按序插入并必要地移到split_page上
-      ktmp = parent_page->KeyAt(i);
-      ptmp = parent_page->ValueAt(i);
-      parent_page->SetKeyAt(i, kins);
-      parent_page->SetValueAt(i, pins);
-      kins = ktmp;
-      pins = ptmp;
-    }
-  }
+  insert_slot = GetSlotNum(split_key, parent_page, true) + 1;
   parent_page->IncreaseSize(1);
-  parent_page->SetKeyAt(parent_page->GetSize() - 1, kins);
-  parent_page->SetValueAt(parent_page->GetSize() - 1, pins);
+  for (int i=parent_page->GetSize()-1; i>insert_slot; i--) {
+    parent_page->SetKeyAt(i, parent_page->KeyAt(i-1));
+    parent_page->SetValueAt(i, parent_page->ValueAt(i-1));
+  }
+  parent_page->SetKeyAt(insert_slot, kins);
+  parent_page->SetValueAt(insert_slot, pins);
   parent_guard.Drop();
 #ifdef ZHHAO_P2_INSERT_DEBUG
   log = std::stringstream();

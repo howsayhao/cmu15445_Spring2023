@@ -132,6 +132,13 @@ class BPlusTree {
    */
   void BatchOpsFromFile(const std::string &file_name, Transaction *txn = nullptr);
 
+
+
+
+
+
+  auto GetSlotNum(const KeyType &key, const BPlusTreePage *bp_page, bool type) -> int;
+
  private:
   /* Debug Routines for FREE!! */
   void ToGraph(page_id_t page_id, const BPlusTreePage *page, std::ofstream &out);
