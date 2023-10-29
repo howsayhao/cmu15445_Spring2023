@@ -40,6 +40,10 @@ class BasicPageGuard {
    */
   void Drop();
 
+  void RUnLock() { page_->RUnlatch(); }
+
+  void WUnLock() { page_->WUnlatch(); }
+
   /** TODO(P1): Add implementation
    *
    * @brief Move assignment for BasicPageGuard

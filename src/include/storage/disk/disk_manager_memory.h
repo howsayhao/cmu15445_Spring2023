@@ -76,9 +76,9 @@ class DiskManagerUnlimitedMemory : public DiskManager {
       std::this_thread::sleep_for(std::chrono::milliseconds(latency_));
     }
     // std::cout << "write latency:  " << latency_ << std::endl;
-    auto log = std::stringstream();
-    log << "latency: " << latency_ << std::endl;
-    LOG_DEBUG("%s", log.str().c_str());
+    // auto log = std::stringstream();
+    // log << "latency: " << latency_ << std::endl;
+    // LOG_DEBUG("%s", log.str().c_str());
 
     std::unique_lock<std::mutex> l(mutex_);
     if (page_id >= static_cast<int>(data_.size())) {

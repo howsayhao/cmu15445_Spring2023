@@ -81,7 +81,7 @@ class BufferPoolManager {
    * @param[out] page_id id of created page
    * @return nullptr if no new pages could be created, otherwise pointer to new page
    */
-  auto NewPage(page_id_t *page_id) -> Page *;
+  auto NewPage(page_id_t *page_id, AccessType access_type = AccessType::Unknown) -> Page *;
 
   /**
    * TODO(P1): Add implementation
@@ -95,7 +95,7 @@ class BufferPoolManager {
    * @param[out] page_id, the id of the new page
    * @return BasicPageGuard holding a new page
    */
-  auto NewPageGuarded(page_id_t *page_id) -> BasicPageGuard;
+  auto NewPageGuarded(page_id_t *page_id, AccessType access_type = AccessType::Unknown) -> BasicPageGuard;
 
   /**
    * TODO(P1): Add implementation
@@ -210,9 +210,14 @@ class BufferPoolManager {
   std::mutex latch_;
 
   /* 优化 */
-  ReaderWriterLatch rwdlatch_;  // 保护disk内容的读写锁
-  std::mutex dlatch_;
-  std::vector<page_id_t> vec_;
+  // ReaderWriterLatch rwdlatch_;  // 保护disk内容的读写锁
+  std::mutex disk_latch_;
+  std::mutex pgtbl_latch_;
+  std::mutex list_latch_;
+  // std::vector<std::pair<frame_id_t, std::mutex>> frame_latch_;
+  std::mutex *frame_latch_;
+  // std::mutex flatch_[pool_size_];
+  // std::vector<page_id_t> vec_;
 
   /**
    * @brief Allocate a page on disk. Caller should acquire the latch before calling this function.
