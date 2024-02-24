@@ -13,6 +13,7 @@
 #include "buffer/buffer_pool_manager.h"
 // #include <mutex>
 #include <sstream>
+#include <string>
 #include <utility>
 // #include <thread>
 
@@ -36,7 +37,7 @@ BufferPoolManager::BufferPoolManager(size_t pool_size, DiskManager *disk_manager
     : pool_size_(pool_size), disk_manager_(disk_manager), log_manager_(log_manager) {
   // we allocate a consecutive memory space for the buffer pool
   pages_ = new Page[pool_size_];
-  frame_latch_ = new std::mutex[pool_size_];
+  // frame_latch_ = new std::mutex[pool_size_];
   replacer_ = std::make_unique<LRUKReplacer>(pool_size, replacer_k);
 
   // Initially, every page is in the free list.
@@ -47,7 +48,7 @@ BufferPoolManager::BufferPoolManager(size_t pool_size, DiskManager *disk_manager
 
 BufferPoolManager::~BufferPoolManager() {
   delete[] pages_;
-  delete[] frame_latch_;
+  // delete[] frame_latch_;
 }
 
 auto BufferPoolManager::NewPage(page_id_t *page_id, AccessType access_type) -> Page * {
@@ -66,6 +67,7 @@ auto BufferPoolManager::NewPage(page_id_t *page_id, AccessType access_type) -> P
         dirty_flag = true;
         // disk_manager_->WritePage(pages_[frame_to_set].GetPageId(), pages_[frame_to_set].GetData());
       }
+      // std::cout << "new page evict, frame_to_set: " << frame_to_set << std::endl;
     } else {
       latch_.unlock();
       return nullptr;
@@ -73,6 +75,7 @@ auto BufferPoolManager::NewPage(page_id_t *page_id, AccessType access_type) -> P
   } else {
     frame_to_set = this->free_list_.front();
     free_list_.pop_front();
+    // std::cout << "new page from list, frame_to_set: " << frame_to_set << std::endl;
   }
   // 更新在LRUK-Replacer中的记录信息
   replacer_->RecordAccess(frame_to_set);
@@ -94,21 +97,32 @@ auto BufferPoolManager::NewPage(page_id_t *page_id, AccessType access_type) -> P
   // 正常的写回没有问题，因为我b_plus_tree是唯一使用并调用page的应用层，而每次调用page我都有AsMut，所以脏位设置应该没有遗漏
   // disk_manager_->WritePage(*page_id, pages_[frame_to_set].GetData());
 
+  // std::cout << "new page:  " << *page_id << std::endl;
+
   auto return_page = &pages_[frame_to_set];
 
+  // 添加这段是为了减少冲突开销，new的时候就加写锁而不用再fetch；在B+树项目中都是用的NewPageGuarded(,
+  // Scan)的，且之后会手动解锁
   if (access_type == AccessType::Scan) {
     pages_[frame_to_set].WLatch();
   }
-  frame_latch_[frame_to_set].lock();
-  disk_latch_.lock();
-  latch_.unlock();
+  // std::string dirty_data;
+  // dirty_data.resize(BUSTUB_PAGE_SIZE);
+  // if (dirty_flag) {
+  //   dirty_data.assign(pages_[frame_to_set].GetData());
+  // }
+  // frame_latch_[frame_to_set].lock();
+  // disk_latch_.lock();
+  // latch_.unlock();
 
   if (dirty_flag) {
     // 因为是第一次new，所以在还没有完全退出之前，这个page id不会再被访问，这个frame也不会被踢出使用
     disk_manager_->WritePage(dirty_page_id, pages_[frame_to_set].GetData());
+    // disk_manager_->WritePage(dirty_page_id, dirty_data.c_str());
   }
-  disk_latch_.unlock();
-  frame_latch_[frame_to_set].unlock();
+  // disk_latch_.unlock();
+  latch_.unlock();
+  // frame_latch_[frame_to_set].unlock();
 
   return return_page;
 }
@@ -124,6 +138,7 @@ auto BufferPoolManager::FetchPage(page_id_t page_id, [[maybe_unused]] AccessType
             << "  | curr_evictable_nums: " << this->replacer_->GetEvictableSize()
             << "  | tread: " << std::this_thread::get_id() << std::endl;
 #endif
+  // std::cout << "fetch page:  " << page_id << std::endl;
   if (page_table_.find(page_id) == page_table_.end() && replacer_->GetEvictableSize() <= 0 && free_list_.empty()) {
     latch_.unlock();
     return nullptr;
@@ -133,9 +148,11 @@ auto BufferPoolManager::FetchPage(page_id_t page_id, [[maybe_unused]] AccessType
       replacer_->Evict(&frame_to_fetch);
       dirty_page_id = pages_[frame_to_fetch].GetPageId();
       page_table_.erase(dirty_page_id);
+      // std::cout << "fetch page evict, frame_to_fetch: " << frame_to_fetch << std::endl;
     } else {  // 要么是free_list里frame还有没用的
       frame_to_fetch = free_list_.front();
       free_list_.pop_front();
+      // std::cout << "fetch page from list, frame_to_fetch: " << frame_to_fetch << std::endl;
     }
     page_table_.insert(std::make_pair(page_id, frame_to_fetch));  // 得到frame后，马上装载进pgtbl里
     replacer_->RecordAccess(frame_to_fetch);
@@ -153,8 +170,8 @@ auto BufferPoolManager::FetchPage(page_id_t page_id, [[maybe_unused]] AccessType
     } else if (access_type == AccessType::Scan) {
       fetch_page->WLatch();
     }
-    frame_latch_[frame_to_fetch].lock();
-    frame_latch_[frame_to_fetch].unlock();
+    // frame_latch_[frame_to_fetch].lock();
+    // frame_latch_[frame_to_fetch].unlock();
     // 上面两个并不能够实现对数据内容的完全隔离
     // disk_latch_.lock();
     // disk_latch_.unlock();
@@ -179,17 +196,23 @@ auto BufferPoolManager::FetchPage(page_id_t page_id, [[maybe_unused]] AccessType
   } else if (access_type == AccessType::Scan) {
     fetch_page->WLatch();
   }
-  frame_latch_[frame_to_fetch].lock();
-  disk_latch_.lock();
-  latch_.unlock();
+  // std::string dirty_data;
+  // if (dirty_flag) {
+  //   dirty_data.assign(pages_[frame_to_fetch].GetData());
+  // }
+  // // frame_latch_[frame_to_fetch].lock();
+  // disk_latch_.lock();
+  // latch_.unlock();
 
   // disk_latch_.lock();
   if (dirty_flag) {
+    // disk_manager_->WritePage(dirty_page_id, dirty_data.c_str());
     disk_manager_->WritePage(dirty_page_id, pages_[frame_to_fetch].GetData());
   }
   disk_manager_->ReadPage(page_id, pages_[frame_to_fetch].GetData());
-  disk_latch_.unlock();
-  frame_latch_[frame_to_fetch].unlock();
+  // disk_latch_.unlock();
+  latch_.unlock();
+  // frame_latch_[frame_to_fetch].unlock();
 
   return fetch_page;
 }
@@ -202,11 +225,17 @@ auto BufferPoolManager::UnpinPage(page_id_t page_id, bool is_dirty, [[maybe_unus
   }
   auto frame_to_unpin = page_table_.at(page_id);
   if (pages_[frame_to_unpin].GetPinCount() <= 0) {
+    if (pages_[frame_to_unpin].GetPinCount() < 0) {
+      std::cout << "over-unpin before unpin again" << std::endl;
+    }
     latch_.unlock();
     return false;
   }
   pages_[frame_to_unpin].pin_count_--;
   if (pages_[frame_to_unpin].GetPinCount() <= 0) {
+    if (pages_[frame_to_unpin].GetPinCount() < 0) {
+      std::cout << "over-unpin after this unpin" << std::endl;
+    }
     replacer_->SetEvictable(frame_to_unpin, true);
   }
   if (is_dirty) {  // 因为一个线程的false不代表所有线程的false

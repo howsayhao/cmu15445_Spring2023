@@ -100,6 +100,9 @@ auto BPLUSTREE_TYPE::GetValue(const KeyType &key, std::vector<ValueType> *result
   auto curr_page = guard.template As<BPlusTreePage>();
   while (!curr_page->IsLeafPage()) {
     int slot_num = GetSlotNum(key, curr_page, true);
+    if (slot_num == -1) {
+      return false;
+    }
     // auto internal_page = reinterpret_cast<const InternalPage *>(curr_page);
     guard = bpm_->FetchPageRead(reinterpret_cast<const InternalPage *>(curr_page)->ValueAt(slot_num));
 #ifdef ZHHAO_P2_GET_DEBUG
@@ -125,19 +128,9 @@ auto BPLUSTREE_TYPE::GetValue(const KeyType &key, std::vector<ValueType> *result
 #endif
 }
 
-/*****************************************************************************
- * INSERTION
- *****************************************************************************/
-/*
- * Insert constant key & value pair into b+ tree
- * if current tree is empty, start new tree, update root page id and insert
- * entry, otherwise insert into leaf page.
- * @return: since we only support unique key, if user try to insert duplicate
- * keys return false, otherwise return true.
- */
 INDEX_TEMPLATE_ARGUMENTS
-auto BPLUSTREE_TYPE::GetSlotNum(const KeyType &key, const BPlusTreePage *bp_page, bool type) -> int {
-  if (!type) {  // 叶子结点
+auto BPLUSTREE_TYPE::GetSlotNum(const KeyType &key, const BPlusTreePage *bp_page, bool leaftype) -> int {
+  if (!leaftype) {  // 叶子结点
     auto leaf_page = reinterpret_cast<const LeafPage *>(bp_page);
     int start = 0;
     int end = leaf_page->GetSize() - 1;
@@ -146,7 +139,7 @@ auto BPLUSTREE_TYPE::GetSlotNum(const KeyType &key, const BPlusTreePage *bp_page
       int val = comparator_(key, leaf_page->KeyAt(slot_num));
       if (val == 0) {
         return slot_num;
-      } 
+      }
       if (val > 0) {
         start = slot_num + 1;
       } else {
@@ -163,7 +156,7 @@ auto BPLUSTREE_TYPE::GetSlotNum(const KeyType &key, const BPlusTreePage *bp_page
         if (slot_num == start) {
           return start - 1;
         }
-        if (comparator_(key, internal_page->KeyAt(slot_num-1)) >= 0) {
+        if (comparator_(key, internal_page->KeyAt(slot_num - 1)) >= 0) {
           return slot_num - 1;
         }
         end = slot_num - 1;
@@ -171,7 +164,7 @@ auto BPLUSTREE_TYPE::GetSlotNum(const KeyType &key, const BPlusTreePage *bp_page
         if (slot_num == end) {
           return end;
         }
-        if (comparator_(key, internal_page->KeyAt(slot_num+1)) < 0) {
+        if (comparator_(key, internal_page->KeyAt(slot_num + 1)) < 0) {
           return slot_num;
         }
         start = slot_num + 1;
@@ -181,17 +174,28 @@ auto BPLUSTREE_TYPE::GetSlotNum(const KeyType &key, const BPlusTreePage *bp_page
   return -1;  // 代表没有找到，仅叶子结点会有这种情况
 }
 
+/*****************************************************************************
+ * INSERTION
+ *****************************************************************************/
+/*
+ * Insert constant key & value pair into b+ tree
+ * if current tree is empty, start new tree, update root page id and insert
+ * entry, otherwise insert into leaf page.
+ * @return: since we only support unique key, if user try to insert duplicate
+ * keys return false, otherwise return true.
+ */
 INDEX_TEMPLATE_ARGUMENTS
 auto BPLUSTREE_TYPE::Insert(const KeyType &key, const ValueType &value, Transaction *txn) -> bool {
 #ifdef ZHHAO_P2_INSERT0_DEBUG
   KeyType index_1;
-  // KeyType index_999;
+  KeyType index_999;
   index_1.SetFromInteger(1);
-  // index_999.SetFromInteger(999);
-  // if (comparator_(key, index_1) == 0 || comparator_(key, index_999) == 0) {
-  if (comparator_(key, index_1) == 0) {
+  index_999.SetFromInteger(999);
+  if (comparator_(key, index_1) == 0 || comparator_(key, index_999) == 0) {
+    // if (comparator_(key, index_1) == 0) {
     auto log = std::stringstream();
-    log << "---insert---" << key << std::endl;
+    log << "---insert---" << key;
+    log << " | thread " << std::this_thread::get_id() << std::endl;
     LOG_DEBUG("%s", log.str().c_str());
   }
 #endif
@@ -206,9 +210,12 @@ auto BPLUSTREE_TYPE::Insert(const KeyType &key, const ValueType &value, Transact
 #ifdef POSITIVE_CRAB
   ReadPageGuard head_read_guard = bpm_->FetchPageRead(header_page_id_);
 #ifdef ZHHAO_P2_INSERT_DEBUG
-  auto log = std::stringstream();
-  log << "---insert get header for positive crab---" << key << " | thread " << std::this_thread::get_id() << std::endl;
-  LOG_DEBUG("%s", log.str().c_str());
+  {
+    auto log = std::stringstream();
+    log << "---insert get header for positive crab---" << key << " | thread " << std::this_thread::get_id()
+        << std::endl;
+    LOG_DEBUG("%s", log.str().c_str());
+  }
 #endif
   auto head_read_page = head_read_guard.As<BPlusTreeHeaderPage>();
   if (head_read_page->root_page_id_ != INVALID_PAGE_ID) {
@@ -227,7 +234,7 @@ auto BPLUSTREE_TYPE::Insert(const KeyType &key, const ValueType &value, Transact
       bool already_found{false};
       while (!already_found) {
         int slot_num = GetSlotNum(key, curr_read_page, true);
-        if (comparator_(curr_read_page->KeyAt(0), vice_key) != 0) {
+        if (comparator_(curr_read_page->KeyAt(0), vice_key) != 0) {  // 内部结点
           read_guard = bpm_->FetchPageRead(curr_read_page->ValueAt(slot_num));
           curr_read_page = read_guard.template As<InternalPage>();
         } else {
@@ -239,25 +246,27 @@ auto BPLUSTREE_TYPE::Insert(const KeyType &key, const ValueType &value, Transact
     }
     auto leaf_crab_page = leaf_crab_guard.AsMut<LeafPage>();
 #ifdef ZHHAO_P2_INSERT_DEBUG
-    log = std::stringstream();
-    log << "insert crab inspect: ";
-    log << " | thread " << std::this_thread::get_id() << std::endl;
-    for (int i = 0; i < leaf_crab_page->GetSize(); i++) {
-      log << leaf_crab_page->KeyAt(i) << ", ";
+    {
+      auto log = std::stringstream();
+      log << "insert crab inspect: ";
+      log << " | thread " << std::this_thread::get_id() << std::endl;
+      for (int i = 0; i < leaf_crab_page->GetSize(); i++) {
+        log << leaf_crab_page->KeyAt(i) << ", ";
+      }
+      log << "   | page id: " << leaf_crab_guard.PageId() << "  | key: " << key << std::endl;
+      LOG_DEBUG("%s", log.str().c_str());
     }
-    log << "   | page id: " << leaf_crab_guard.PageId() << "  | key: " << key << std::endl;
-    LOG_DEBUG("%s", log.str().c_str());
 #endif
-//     for (int i = 0; i < leaf_crab_page->GetSize(); i++) {  // 先判断duplicate_key
-//       if (comparator_(leaf_crab_page->KeyAt(i), key) == 0) {
-// #ifdef ZHHAO_P2_INSERT_DEBUG
-//         log = std::stringstream();
-//         log << "---insert out,duplicate---" << key << " | thread " << std::this_thread::get_id() << std::endl;
-//         LOG_DEBUG("%s", log.str().c_str());
-// #endif
-//         return false;
-//       }
-//     }
+    //     for (int i = 0; i < leaf_crab_page->GetSize(); i++) {  // 先判断duplicate_key
+    //       if (comparator_(leaf_crab_page->KeyAt(i), key) == 0) {
+    // #ifdef ZHHAO_P2_INSERT_DEBUG
+    //         log = std::stringstream();
+    //         log << "---insert out,duplicate---" << key << " | thread " << std::this_thread::get_id() << std::endl;
+    //         LOG_DEBUG("%s", log.str().c_str());
+    // #endif
+    //         return false;
+    //       }
+    //     }
     if (GetSlotNum(key, leaf_crab_page, false) != -1) {
       return false;
     }
@@ -275,9 +284,11 @@ auto BPLUSTREE_TYPE::Insert(const KeyType &key, const ValueType &value, Transact
       leaf_crab_page->IncreaseSize(1);
       leaf_crab_page->SetAt(leaf_crab_page->GetSize() - 1, ins.first, ins.second);
 #ifdef ZHHAO_P2_INSERT_DEBUG
-      log = std::stringstream();
-      log << "---insert out,no split leaf---" << key << " | thread " << std::this_thread::get_id() << std::endl;
-      LOG_DEBUG("%s", log.str().c_str());
+      {
+        auto log = std::stringstream();
+        log << "---insert out,no split leaf---" << key << " | thread " << std::this_thread::get_id() << std::endl;
+        LOG_DEBUG("%s", log.str().c_str());
+      }
 #endif
       return true;
     }
@@ -290,17 +301,22 @@ auto BPLUSTREE_TYPE::Insert(const KeyType &key, const ValueType &value, Transact
   /* 之后是非改进版的螃蟹锁策略 */
   WritePageGuard head_write_guard = bpm_->FetchPageWrite(header_page_id_);
 #ifdef ZHHAO_P2_INSERT_DEBUG
-  auto log = std::stringstream();
-  log << "---insert get header for empty judge---" << key << " | thread " << std::this_thread::get_id() << std::endl;
-  LOG_DEBUG("%s", log.str().c_str());
+  {
+    auto log = std::stringstream();
+    log << "---negative start, insert get header for empty judge---" << key << " | thread "
+        << std::this_thread::get_id() << std::endl;
+    LOG_DEBUG("%s", log.str().c_str());
+  }
 #endif
-  auto root_header_page = head_write_guard.template AsMut<BPlusTreeHeaderPage>();
+  auto root_header_page = head_write_guard.template As<BPlusTreeHeaderPage>();
   if (root_header_page->root_page_id_ == INVALID_PAGE_ID) {
     page_id_t root_page_id;
     // BasicPageGuard tmp_pin_guard = bpm_->NewPageGuarded(&root_page_id, AccessType::Scan);
     // WritePageGuard root_guard = bpm_->FetchPageWrite(root_page_id);
     // tmp_pin_guard.Drop();
     BasicPageGuard root_guard = bpm_->NewPageGuarded(&root_page_id, AccessType::Scan);
+    auto root_header_page =
+        head_write_guard.template AsMut<BPlusTreeHeaderPage>();  // 此处及之后都作此修改，以减少磁盘写脏页的不必要次数
     root_header_page->root_page_id_ = root_page_id;
     head_write_guard.Drop();
     auto root_page = root_guard.template AsMut<LeafPage>();
@@ -309,28 +325,28 @@ auto BPLUSTREE_TYPE::Insert(const KeyType &key, const ValueType &value, Transact
     root_page->IncreaseSize(1);
     root_page->SetAt(0, key, value);
 #ifdef ZHHAO_P2_INSERT_DEBUG
-    log = std::stringstream();
-    log << "---insert out, empty---" << key << " | thread " << std::this_thread::get_id() << std::endl;
-    LOG_DEBUG("%s", log.str().c_str());
+    {
+      auto log = std::stringstream();
+      log << "---insert out, empty---" << key << " | thread " << std::this_thread::get_id() << std::endl;
+      LOG_DEBUG("%s", log.str().c_str());
+    }
 #endif
     root_guard.WUnLock();
     root_guard.Drop();
     return true;
   }
-#ifdef ZHHAO_P2_INSERT_DEBUG
-  log = std::stringstream();
-  log << "---insert get header for bad route---" << key << " | thread " << std::this_thread::get_id() << std::endl;
-  LOG_DEBUG("%s", log.str().c_str());
-#endif
+
   WritePageGuard root_guard = bpm_->FetchPageWrite(root_header_page->root_page_id_);
 #ifdef ZHHAO_P2_INSERT_DEBUG
-  log = std::stringstream();
-  log << "---insert get header for bad route, and root---" << key << " | thread " << std::this_thread::get_id()
-      << std::endl;
-  LOG_DEBUG("%s", log.str().c_str());
+  {
+    auto log = std::stringstream();
+    log << "---insert get root---" << key << " | thread " << std::this_thread::get_id() << std::endl;
+    LOG_DEBUG("%s", log.str().c_str());
+  }
 #endif
   ctx.write_set_.push_back(std::move(head_write_guard));
-  auto curr_page = root_guard.template AsMut<InternalPage>();
+  // auto curr_page = root_guard.template AsMut<InternalPage>();
+  auto curr_page = root_guard.template As<InternalPage>();
   if (curr_page->GetSize() < curr_page->GetMaxSize()) {
     ctx.write_set_.clear();
   }
@@ -339,7 +355,8 @@ auto BPLUSTREE_TYPE::Insert(const KeyType &key, const ValueType &value, Transact
     WritePageGuard guard;
     int slot_num = GetSlotNum(key, curr_page, true);
     guard = bpm_->FetchPageWrite(curr_page->ValueAt(slot_num));
-    curr_page = guard.template AsMut<InternalPage>();
+    // curr_page = guard.template AsMut<InternalPage>();
+    curr_page = guard.template As<InternalPage>();
     if (curr_page->GetSize() < curr_page->GetMaxSize()) {  // 此时ctx.write_set_中必然至少有一个父亲结点
       ctx.write_set_.clear();
     }
@@ -409,29 +426,33 @@ auto BPLUSTREE_TYPE::Insert(const KeyType &key, const ValueType &value, Transact
   // auto orign_page_id = ctx.write_set_.back().PageId();
   // auto leaf_page = ctx.write_set_.back().AsMut<LeafPage>();
   auto orign_page_id = leaf_guard.PageId();
-  auto leaf_page = leaf_guard.template AsMut<LeafPage>();
+  auto leaf_page_not_mut = leaf_guard.template As<LeafPage>();
   ctx.write_set_.pop_back();
 
 #ifdef ZHHAO_P2_INSERT_DEBUG
-  log = std::stringstream();
-  log << "thread " << std::this_thread::get_id() << " | insert"
-      << ": " << key << " [page_id: " << leaf_guard.PageId() << ", size: " << leaf_guard.As<BPlusTreePage>()->GetSize()
-      << "/" << leaf_guard.As<BPlusTreePage>()->GetMaxSize() << "]" << std::endl
-      << "parent ids: ";
-  for (auto &page_guard : ctx.write_set_) {
-    log << page_guard.PageId() << " → ";
+  {
+    auto log = std::stringstream();
+    log << "thread " << std::this_thread::get_id() << " | insert"
+        << ": " << key << " [page_id: " << leaf_guard.PageId()
+        << ", size: " << leaf_guard.As<BPlusTreePage>()->GetSize() << "/"
+        << leaf_guard.As<BPlusTreePage>()->GetMaxSize() << "]" << std::endl
+        << "parent ids: ";
+    for (auto &page_guard : ctx.write_set_) {
+      log << page_guard.PageId() << " → ";
+    }
+    log << leaf_guard.PageId() << std::endl;
+    for (int i = 0; i < leaf_page->GetSize(); i++) {
+      log << leaf_page->KeyAt(i) << ", ";
+    }
+    LOG_DEBUG("%s", log.str().c_str());
   }
-  log << leaf_guard.PageId() << std::endl;
-  for (int i = 0; i < leaf_page->GetSize(); i++) {
-    log << leaf_page->KeyAt(i) << ", ";
-  }
-  LOG_DEBUG("%s", log.str().c_str());
 #endif
 
   // 还需要再判断，因为可能看的时候是满的，但经过前面的处理后又空了
-  if (GetSlotNum(key, leaf_page, false) != -1) {
+  if (GetSlotNum(key, leaf_page_not_mut, false) != -1) {
     return false;
   }
+  auto leaf_page = leaf_guard.template AsMut<LeafPage>();
   if (leaf_page->GetSize() < leaf_page->GetMaxSize()) {  // 后判断会不会有split操作
     for (int i = 0; i < leaf_page->GetSize(); i++) {
       if (comparator_(key, leaf_page->KeyAt(i)) < 0 && insert_slot == -1) {
@@ -446,9 +467,11 @@ auto BPLUSTREE_TYPE::Insert(const KeyType &key, const ValueType &value, Transact
     leaf_page->IncreaseSize(1);
     leaf_page->SetAt(leaf_page->GetSize() - 1, ins.first, ins.second);
 #ifdef ZHHAO_P2_INSERT_DEBUG
-    log = std::stringstream();
-    log << "---insert out,no split leaf2---" << key << " | thread " << std::this_thread::get_id() << std::endl;
-    LOG_DEBUG("%s", log.str().c_str());
+    {
+      auto log = std::stringstream();
+      log << "---insert out,no split leaf2---" << key << " | thread " << std::this_thread::get_id() << std::endl;
+      LOG_DEBUG("%s", log.str().c_str());
+    }
 #endif
     return true;
   }
@@ -577,9 +600,11 @@ auto BPLUSTREE_TYPE::Insert(const KeyType &key, const ValueType &value, Transact
   // 没有non-split parent，意味着需要重建root
   if (ctx.write_set_.front().PageId() == header_page_id_) {
 #ifdef ZHHAO_P2_INSERT_DEBUG
-    log = std::stringstream();
-    log << "---need to rebuild root---" << key << " | thread " << std::this_thread::get_id() << std::endl;
-    LOG_DEBUG("%s", log.str().c_str());
+    {
+      auto log = std::stringstream();
+      log << "---need to rebuild root---" << key << " | thread " << std::this_thread::get_id() << std::endl;
+      LOG_DEBUG("%s", log.str().c_str());
+    }
 #endif
     auto root_header_page = ctx.write_set_.front().template AsMut<BPlusTreeHeaderPage>();
     page_id_t root_page_id;
@@ -608,9 +633,11 @@ auto BPLUSTREE_TYPE::Insert(const KeyType &key, const ValueType &value, Transact
       vice_terminal = false;
     }
 #ifdef ZHHAO_P2_INSERT_DEBUG
-    log = std::stringstream();
-    log << "---insert out,root rebuilt---" << key << " | thread " << std::this_thread::get_id() << std::endl;
-    LOG_DEBUG("%s", log.str().c_str());
+    {
+      auto log = std::stringstream();
+      log << "---insert out,root rebuilt---" << key << " | thread " << std::this_thread::get_id() << std::endl;
+      LOG_DEBUG("%s", log.str().c_str());
+    }
 #endif
     guard.WUnLock();
     guard.Drop();
@@ -625,17 +652,19 @@ auto BPLUSTREE_TYPE::Insert(const KeyType &key, const ValueType &value, Transact
   page_id_t pins = split_page_id;
   insert_slot = GetSlotNum(split_key, parent_page, true) + 1;
   parent_page->IncreaseSize(1);
-  for (int i=parent_page->GetSize()-1; i>insert_slot; i--) {
-    parent_page->SetKeyAt(i, parent_page->KeyAt(i-1));
-    parent_page->SetValueAt(i, parent_page->ValueAt(i-1));
+  for (int i = parent_page->GetSize() - 1; i > insert_slot; i--) {
+    parent_page->SetKeyAt(i, parent_page->KeyAt(i - 1));
+    parent_page->SetValueAt(i, parent_page->ValueAt(i - 1));
   }
   parent_page->SetKeyAt(insert_slot, kins);
   parent_page->SetValueAt(insert_slot, pins);
   parent_guard.Drop();
 #ifdef ZHHAO_P2_INSERT_DEBUG
-  log = std::stringstream();
-  log << "---insert out,top no split---" << key << " | thread " << std::this_thread::get_id() << std::endl;
-  LOG_DEBUG("%s", log.str().c_str());
+  {
+    auto log = std::stringstream();
+    log << "---insert out,top no split---" << key << " | thread " << std::this_thread::get_id() << std::endl;
+    LOG_DEBUG("%s", log.str().c_str());
+  }
 #endif
   return true;
 }

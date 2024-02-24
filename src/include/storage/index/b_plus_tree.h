@@ -132,11 +132,6 @@ class BPlusTree {
    */
   void BatchOpsFromFile(const std::string &file_name, Transaction *txn = nullptr);
 
-
-
-
-
-
   auto GetSlotNum(const KeyType &key, const BPlusTreePage *bp_page, bool type) -> int;
 
  private:

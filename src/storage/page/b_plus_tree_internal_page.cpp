@@ -66,7 +66,7 @@ void B_PLUS_TREE_INTERNAL_PAGE_TYPE::SetValueAt(int index, const ValueType &valu
     array_[index].second = value;
     return;
   }
-  std::cout << "set value, out of internal range" << std::endl;
+  // std::cout << "set value, out of internal range" << std::endl;
 }
 
 /*
@@ -81,7 +81,7 @@ auto B_PLUS_TREE_INTERNAL_PAGE_TYPE::ValueAt(int index) const -> ValueType {
     // }
     return array_[index].second;
   }
-  std::cout << "value at, out of internal range" << std::endl;
+  // std::cout << "value at, out of internal range" << std::endl;
   return array_[0].second;
 }
 

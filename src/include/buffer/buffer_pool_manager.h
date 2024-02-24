@@ -211,11 +211,12 @@ class BufferPoolManager {
 
   /* 优化 */
   // ReaderWriterLatch rwdlatch_;  // 保护disk内容的读写锁
-  std::mutex disk_latch_;
-  std::mutex pgtbl_latch_;
-  std::mutex list_latch_;
+  // std::mutex disk_latch_;
+  // std::mutex pgtbl_latch_;
+  // std::mutex list_latch_;
+  // std::mutex replacer_latch_;
   // std::vector<std::pair<frame_id_t, std::mutex>> frame_latch_;
-  std::mutex *frame_latch_;
+  // std::mutex *frame_latch_;
   // std::mutex flatch_[pool_size_];
   // std::vector<page_id_t> vec_;
 
