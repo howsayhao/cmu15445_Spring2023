@@ -55,164 +55,123 @@ auto BufferPoolManager::NewPage(page_id_t *page_id, AccessType access_type) -> P
   frame_id_t frame_to_set;
   page_id_t dirty_page_id;
   bool dirty_flag{false};
+
   latch_.lock();
-  // 分配好给新page的页框frame
-  if (free_list_.empty()) {  // 没有空的frame了，需要找Replacer腾出空间
-    if (replacer_->Evict(&frame_to_set)) {  // 若成功则说明是处于UnPin的状态，即evictable // 只有各个线程对该page/frame
-                                            // unpin才允许evict
+  if (!free_list_.empty()) {  // 检查free_list_并分配frame_id
+    frame_to_set = this->free_list_.front();
+    free_list_.pop_front();
+  } else {
+    if (replacer_->Evict(&frame_to_set)) {  // evict, 并清理旧page维护信息
       dirty_page_id = pages_[frame_to_set].GetPageId();
       page_table_.erase(dirty_page_id);
       if (pages_[frame_to_set].IsDirty()) {
-        // dirty_page_id = pages_[frame_to_set].GetPageId();
         dirty_flag = true;
-        // disk_manager_->WritePage(pages_[frame_to_set].GetPageId(), pages_[frame_to_set].GetData());
       }
-      // std::cout << "new page evict, frame_to_set: " << frame_to_set << std::endl;
     } else {
       latch_.unlock();
       return nullptr;
     }
-  } else {
-    frame_to_set = this->free_list_.front();
-    free_list_.pop_front();
-    // std::cout << "new page from list, frame_to_set: " << frame_to_set << std::endl;
   }
-  // 更新在LRUK-Replacer中的记录信息
+  // 申请新的page id
+  *page_id = AllocatePage();
+  // 初始化page在被分配frame的维护信息
   replacer_->RecordAccess(frame_to_set);
   replacer_->SetEvictable(frame_to_set, false);
-  // 都要对新的page的meta信息做初始化
-  *page_id = AllocatePage();
   pages_[frame_to_set].is_dirty_ = false;
   pages_[frame_to_set].page_id_ = *page_id;
   pages_[frame_to_set].pin_count_ = 1;
   page_table_.insert(std::make_pair(*page_id, frame_to_set));
-  // PROJ_2#2，DEBUG_LOG
-  // 这一处的逻辑是这样的，如果没有这个，因为会出现还没有来得及对某page做修改就因为evictable被驱逐了，此时
-  // 有个进程会要去用这个page，已知page id，但没有写回则disk_manager不认为自己分配了该page，会报错，返回空数据
-  // 但返回空数据本身没有影响，因为逻辑上还没有修改过的数据返回空数据也符合预期，这也是为什么虽然报错但基本的查询结果都没问题
-  // 分析：我在b_plus_tree的实现中，在获取新page时为NewPageGuarded; guard =
-  // FetchGuarded;前者是有返回值的，但我没有绑定变量
-  // 这使得新New的guard遵循RAII设计自主释放了，因而可以被驱逐；所以我再接着想fetch时就可能会得到空数据；
-  // 可如果仅仅是这个，问题貌似不是太大，无非是爆一些warning而已
-  // 正常的写回没有问题，因为我b_plus_tree是唯一使用并调用page的应用层，而每次调用page我都有AsMut，所以脏位设置应该没有遗漏
-  // disk_manager_->WritePage(*page_id, pages_[frame_to_set].GetData());
 
-  // std::cout << "new page:  " << *page_id << std::endl;
-
-  auto return_page = &pages_[frame_to_set];
-
-  // 添加这段是为了减少冲突开销，new的时候就加写锁而不用再fetch；在B+树项目中都是用的NewPageGuarded(,
-  // Scan)的，且之后会手动解锁
-  if (access_type == AccessType::Scan) {
-    pages_[frame_to_set].WLatch();
-  }
-  // std::string dirty_data;
-  // dirty_data.resize(BUSTUB_PAGE_SIZE);
-  // if (dirty_flag) {
-  //   dirty_data.assign(pages_[frame_to_set].GetData());
-  // }
   // frame_latch_[frame_to_set].lock();
-  // disk_latch_.lock();
   // latch_.unlock();
-
-  if (dirty_flag) {
-    // 因为是第一次new，所以在还没有完全退出之前，这个page id不会再被访问，这个frame也不会被踢出使用
-    disk_manager_->WritePage(dirty_page_id, pages_[frame_to_set].GetData());
-    // disk_manager_->WritePage(dirty_page_id, dirty_data.c_str());
+  auto new_page = &pages_[frame_to_set];
+  if (access_type == AccessType::Scan) {
+    new_page->WLatch();
   }
-  // disk_latch_.unlock();
+  // latch_.unlock();
+  auto dirty_data = pages_[frame_to_set].GetData();
+  if (dirty_flag) {
+    disk_manager_->WritePage(dirty_page_id, dirty_data);
+  }
   latch_.unlock();
   // frame_latch_[frame_to_set].unlock();
 
-  return return_page;
+  return new_page;
 }
 
 auto BufferPoolManager::FetchPage(page_id_t page_id, [[maybe_unused]] AccessType access_type) -> Page * {
   frame_id_t frame_to_fetch;
   bool dirty_flag{false};
   page_id_t dirty_page_id;
-  latch_.lock();
 #ifdef ZHHAO_P2_BUFFERPOOL_DEBUG
   std::cout << "fetch page: " << page_id << "  | max_buffer_pool_size: " << this->replacer_->MaxSize()
             << "  | curr_buffer_pool_size: " << this->replacer_->GetSize()
             << "  | curr_evictable_nums: " << this->replacer_->GetEvictableSize()
             << "  | tread: " << std::this_thread::get_id() << std::endl;
 #endif
-  // std::cout << "fetch page:  " << page_id << std::endl;
-  if (page_table_.find(page_id) == page_table_.end() && replacer_->GetEvictableSize() <= 0 && free_list_.empty()) {
-    latch_.unlock();
-    return nullptr;
-  }
-  if (page_table_.find(page_id) == page_table_.end()) {  // 尚未装载到pgtbl中，因为没有对应的frame给到这个page_id
-    if (free_list_.empty()) {                            // 要么是需要踢出一些frame的
-      replacer_->Evict(&frame_to_fetch);
-      dirty_page_id = pages_[frame_to_fetch].GetPageId();
-      page_table_.erase(dirty_page_id);
-      // std::cout << "fetch page evict, frame_to_fetch: " << frame_to_fetch << std::endl;
-    } else {  // 要么是free_list里frame还有没用的
-      frame_to_fetch = free_list_.front();
-      free_list_.pop_front();
-      // std::cout << "fetch page from list, frame_to_fetch: " << frame_to_fetch << std::endl;
-    }
-    page_table_.insert(std::make_pair(page_id, frame_to_fetch));  // 得到frame后，马上装载进pgtbl里
-    replacer_->RecordAccess(frame_to_fetch);
-    replacer_->SetEvictable(frame_to_fetch, false);
-  } else {  // 是在原已有的page上读入，那么没有必要清除这个frame的history
+
+  latch_.lock();
+  if (page_table_.find(page_id) != page_table_.end()) {  // 该page就在frame中，更新记录和pin即可，然后尝试获取读写锁
     frame_to_fetch = page_table_.at(page_id);
-    auto fetch_page = &pages_[frame_to_fetch];
     replacer_->RecordAccess(frame_to_fetch);
     replacer_->SetEvictable(frame_to_fetch, false);
     pages_[frame_to_fetch].pin_count_++;
+    auto fetch_page = &pages_[frame_to_fetch];
     latch_.unlock();
-    // pages_[frame_to_fetch].pin_count_++;
+
+    // frame_latch_[frame_to_fetch].lock();
+    // latch_.unlock();
     if (access_type == AccessType::Get) {
       fetch_page->RLatch();
     } else if (access_type == AccessType::Scan) {
       fetch_page->WLatch();
     }
-    // frame_latch_[frame_to_fetch].lock();
     // frame_latch_[frame_to_fetch].unlock();
-    // 上面两个并不能够实现对数据内容的完全隔离
-    // disk_latch_.lock();
-    // disk_latch_.unlock();
+
     return fetch_page;
   }
-  // 不管是哪种情况，现在已经得到了frame_to_fetch，并都载入了pgtbl，且得到了一个已有数据的page，需要对page的meta
-  // data做一些初始化
-  auto fetch_page = &pages_[frame_to_fetch];
-  if (pages_[frame_to_fetch].IsDirty()) {
-    dirty_flag = true;
-    // dirty_page_id = pages_[frame_to_fetch].GetPageId();
-    // disk_manager_->WritePage(pages_[frame_to_fetch].GetPageId(), pages_[frame_to_fetch].GetData());  //
+  if (!free_list_.empty()) {  // 检查free_list_并分配frame
+    // 但是至少在proj2里面fetch都是获取已经申请了page id的，而只有在free_list_满了后才可能被踢掉而进入这条语句，
+    // 在proj2的一次运行中，free_list_满了后就不会回收，所以这里实际不会执行到
+    frame_to_fetch = free_list_.front();
+    free_list_.pop_front();
+  } else {
+    if (replacer_->Evict(&frame_to_fetch)) {
+      dirty_page_id = pages_[frame_to_fetch].GetPageId();
+      page_table_.erase(dirty_page_id);
+      if (pages_[frame_to_fetch].IsDirty()) {
+        dirty_flag = true;
+      }
+    } else {
+      latch_.unlock();
+      return nullptr;
+    }
   }
-  pages_[frame_to_fetch].pin_count_ = 1;
-  pages_[frame_to_fetch].page_id_ = page_id;
+  // 初始化page在被分配frame的维护信息
+  replacer_->RecordAccess(frame_to_fetch);
+  replacer_->SetEvictable(frame_to_fetch, false);
   pages_[frame_to_fetch].is_dirty_ = false;
+  pages_[frame_to_fetch].page_id_ = page_id;
+  pages_[frame_to_fetch].pin_count_ = 1;
+  page_table_.insert(std::make_pair(page_id, frame_to_fetch));  // 得到frame后，马上装载进pgtbl里
 
-  // disk_manager_->ReadPage(page_id, pages_[frame_to_fetch].GetData());
+  // frame_latch_[frame_to_fetch].lock();
+  // latch_.unlock();
+  // frame_latch_[frame_to_fetch].lock();
+  auto fetch_page = &pages_[frame_to_fetch];
+  // latch_.unlock();
+  if (dirty_flag) {
+    disk_manager_->WritePage(dirty_page_id, pages_[frame_to_fetch].GetData());
+  }
+  disk_manager_->ReadPage(page_id, pages_[frame_to_fetch].GetData());
+  latch_.unlock();
+  // frame_latch_[frame_to_fetch].unlock();
 
   if (access_type == AccessType::Get) {
     fetch_page->RLatch();
   } else if (access_type == AccessType::Scan) {
     fetch_page->WLatch();
   }
-  // std::string dirty_data;
-  // if (dirty_flag) {
-  //   dirty_data.assign(pages_[frame_to_fetch].GetData());
-  // }
-  // // frame_latch_[frame_to_fetch].lock();
-  // disk_latch_.lock();
-  // latch_.unlock();
-
-  // disk_latch_.lock();
-  if (dirty_flag) {
-    // disk_manager_->WritePage(dirty_page_id, dirty_data.c_str());
-    disk_manager_->WritePage(dirty_page_id, pages_[frame_to_fetch].GetData());
-  }
-  disk_manager_->ReadPage(page_id, pages_[frame_to_fetch].GetData());
-  // disk_latch_.unlock();
-  latch_.unlock();
-  // frame_latch_[frame_to_fetch].unlock();
 
   return fetch_page;
 }
