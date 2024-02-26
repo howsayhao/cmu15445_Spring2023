@@ -52,6 +52,7 @@ auto LRUKReplacer::Evict(frame_id_t *frame_id) -> bool {
   node_store_.erase(frame_to_evict);
   *frame_id = frame_to_evict;
   curr_size_--;
+
   latch_.unlock();
   return true;
 }

@@ -62,9 +62,9 @@ auto BufferPoolManager::NewPage(page_id_t *page_id) -> Page * {
     free_list_.pop_front();
   } else {
     if (replacer_->Evict(&frame_to_set)) {  // evict, 并清理旧page维护信息
-      dirty_page_id = pages_[frame_to_set].GetPageId();
+      dirty_page_id = pages_[frame_to_set].page_id_;
       page_table_.erase(dirty_page_id);
-      if (pages_[frame_to_set].IsDirty()) {
+      if (pages_[frame_to_set].is_dirty_) {
         dirty_flag = true;
       }
     } else {
@@ -91,9 +91,9 @@ auto BufferPoolManager::NewPage(page_id_t *page_id) -> Page * {
   //   new_page->WLatch();
   // }
   // latch_.unlock();
-  auto dirty_data = pages_[frame_to_set].GetData();
+  // auto dirty_data = pages_[frame_to_set].data_;
   if (dirty_flag) {
-    disk_manager_->WritePage(dirty_page_id, dirty_data);
+    disk_manager_->WritePage(dirty_page_id, pages_[frame_to_set].data_);
   }
   latch_.unlock();
   // frame_latch_[frame_to_set].unlock();
@@ -129,9 +129,9 @@ auto BufferPoolManager::FetchPage(page_id_t page_id, [[maybe_unused]] AccessType
     free_list_.pop_front();
   } else {
     if (replacer_->Evict(&frame_to_fetch)) {
-      dirty_page_id = pages_[frame_to_fetch].GetPageId();
+      dirty_page_id = pages_[frame_to_fetch].page_id_;
       page_table_.erase(dirty_page_id);
-      if (pages_[frame_to_fetch].IsDirty()) {
+      if (pages_[frame_to_fetch].is_dirty_) {
         dirty_flag = true;
       }
     } else {
@@ -149,9 +149,9 @@ auto BufferPoolManager::FetchPage(page_id_t page_id, [[maybe_unused]] AccessType
   page_table_.insert(std::make_pair(page_id, frame_to_fetch));  // 得到frame后，马上装载进pgtbl里
 
   if (dirty_flag) {
-    disk_manager_->WritePage(dirty_page_id, pages_[frame_to_fetch].GetData());
+    disk_manager_->WritePage(dirty_page_id, pages_[frame_to_fetch].data_);
   }
-  disk_manager_->ReadPage(page_id, pages_[frame_to_fetch].GetData());
+  disk_manager_->ReadPage(page_id, pages_[frame_to_fetch].data_);
   latch_.unlock();
 
   return fetch_page;
@@ -164,16 +164,16 @@ auto BufferPoolManager::UnpinPage(page_id_t page_id, bool is_dirty, [[maybe_unus
     return false;
   }
   auto frame_to_unpin = page_table_.at(page_id);
-  if (pages_[frame_to_unpin].GetPinCount() <= 0) {
-    if (pages_[frame_to_unpin].GetPinCount() < 0) {
+  if (pages_[frame_to_unpin].pin_count_ <= 0) {
+    if (pages_[frame_to_unpin].pin_count_ < 0) {
       std::cout << "over-unpin before unpin again" << std::endl;
     }
     latch_.unlock();
     return false;
   }
   pages_[frame_to_unpin].pin_count_--;
-  if (pages_[frame_to_unpin].GetPinCount() <= 0) {
-    if (pages_[frame_to_unpin].GetPinCount() < 0) {
+  if (pages_[frame_to_unpin].pin_count_ <= 0) {
+    if (pages_[frame_to_unpin].pin_count_ < 0) {
       std::cout << "over-unpin after this unpin" << std::endl;
     }
     replacer_->SetEvictable(frame_to_unpin, true);
@@ -194,7 +194,7 @@ auto BufferPoolManager::FlushPage(page_id_t page_id) -> bool {
   }
 
   auto frame_to_flush = page_table_.at(page_id);
-  disk_manager_->WritePage(page_id, pages_[frame_to_flush].GetData());
+  disk_manager_->WritePage(page_id, pages_[frame_to_flush].data_);
   pages_[frame_to_flush].is_dirty_ = false;
 
   latch_.unlock();
@@ -220,14 +220,14 @@ auto BufferPoolManager::DeletePage(page_id_t page_id) -> bool {
     return true;
   }
   auto frame_to_delete = page_table_.at(page_id);
-  if (pages_[frame_to_delete].GetPinCount() != 0) {
+  if (pages_[frame_to_delete].pin_count_ != 0) {
     latch_.unlock();
     return false;
   }
   // 我觉得还是要写回disk的
-  if (pages_[frame_to_delete].IsDirty()) {
-    disk_manager_->WritePage(pages_[frame_to_delete].GetPageId(),
-                             pages_[frame_to_delete].GetData());  // dirty不按规矩来
+  if (pages_[frame_to_delete].is_dirty_) {
+    disk_manager_->WritePage(pages_[frame_to_delete].page_id_,
+                             pages_[frame_to_delete].data_);  // dirty不按规矩来
   }
   // 删掉memory里的痕迹
   page_table_.erase(page_id);
