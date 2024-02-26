@@ -51,7 +51,7 @@ BufferPoolManager::~BufferPoolManager() {
   // delete[] frame_latch_;
 }
 
-auto BufferPoolManager::NewPage(page_id_t *page_id, AccessType access_type) -> Page * {
+auto BufferPoolManager::NewPage(page_id_t *page_id) -> Page * {
   frame_id_t frame_to_set;
   page_id_t dirty_page_id;
   bool dirty_flag{false};
@@ -74,20 +74,22 @@ auto BufferPoolManager::NewPage(page_id_t *page_id, AccessType access_type) -> P
   }
   // 申请新的page id
   *page_id = AllocatePage();
+  // std::cout << "new page: " << *page_id << std::endl;
   // 初始化page在被分配frame的维护信息
   replacer_->RecordAccess(frame_to_set);
   replacer_->SetEvictable(frame_to_set, false);
-  pages_[frame_to_set].is_dirty_ = false;
-  pages_[frame_to_set].page_id_ = *page_id;
-  pages_[frame_to_set].pin_count_ = 1;
+  auto new_page = &pages_[frame_to_set];
+  new_page->is_dirty_ = false;
+  new_page->page_id_ = *page_id;
+  new_page->pin_count_ = 1;
   page_table_.insert(std::make_pair(*page_id, frame_to_set));
 
   // frame_latch_[frame_to_set].lock();
   // latch_.unlock();
-  auto new_page = &pages_[frame_to_set];
-  if (access_type == AccessType::Scan) {
-    new_page->WLatch();
-  }
+  // auto new_page = &pages_[frame_to_set];
+  // if (access_type == AccessType::Scan) {
+  //   new_page->WLatch();
+  // }
   // latch_.unlock();
   auto dirty_data = pages_[frame_to_set].GetData();
   if (dirty_flag) {
@@ -118,16 +120,6 @@ auto BufferPoolManager::FetchPage(page_id_t page_id, [[maybe_unused]] AccessType
     pages_[frame_to_fetch].pin_count_++;
     auto fetch_page = &pages_[frame_to_fetch];
     latch_.unlock();
-
-    // frame_latch_[frame_to_fetch].lock();
-    // latch_.unlock();
-    if (access_type == AccessType::Get) {
-      fetch_page->RLatch();
-    } else if (access_type == AccessType::Scan) {
-      fetch_page->WLatch();
-    }
-    // frame_latch_[frame_to_fetch].unlock();
-
     return fetch_page;
   }
   if (!free_list_.empty()) {  // 检查free_list_并分配frame
@@ -150,28 +142,17 @@ auto BufferPoolManager::FetchPage(page_id_t page_id, [[maybe_unused]] AccessType
   // 初始化page在被分配frame的维护信息
   replacer_->RecordAccess(frame_to_fetch);
   replacer_->SetEvictable(frame_to_fetch, false);
-  pages_[frame_to_fetch].is_dirty_ = false;
-  pages_[frame_to_fetch].page_id_ = page_id;
-  pages_[frame_to_fetch].pin_count_ = 1;
+  auto fetch_page = &pages_[frame_to_fetch];
+  fetch_page->is_dirty_ = false;
+  fetch_page->page_id_ = page_id;
+  fetch_page->pin_count_ = 1;
   page_table_.insert(std::make_pair(page_id, frame_to_fetch));  // 得到frame后，马上装载进pgtbl里
 
-  // frame_latch_[frame_to_fetch].lock();
-  // latch_.unlock();
-  // frame_latch_[frame_to_fetch].lock();
-  auto fetch_page = &pages_[frame_to_fetch];
-  // latch_.unlock();
   if (dirty_flag) {
     disk_manager_->WritePage(dirty_page_id, pages_[frame_to_fetch].GetData());
   }
   disk_manager_->ReadPage(page_id, pages_[frame_to_fetch].GetData());
   latch_.unlock();
-  // frame_latch_[frame_to_fetch].unlock();
-
-  if (access_type == AccessType::Get) {
-    fetch_page->RLatch();
-  } else if (access_type == AccessType::Scan) {
-    fetch_page->WLatch();
-  }
 
   return fetch_page;
 }
@@ -277,8 +258,8 @@ auto BufferPoolManager::FetchPageRead(page_id_t page_id) -> ReadPageGuard {
 #ifdef ZHHAO_P2_BUFFERPOOL_DEBUG
   std::cout << "fetch read page: " << page_id << std::endl;
 #endif
-  auto fetch_page = FetchPage(page_id, AccessType::Get);
-  // fetch_page->RLatch();
+  auto fetch_page = FetchPage(page_id);
+  fetch_page->RLatch();
   return {this, fetch_page};
 }
 
@@ -286,13 +267,13 @@ auto BufferPoolManager::FetchPageWrite(page_id_t page_id) -> WritePageGuard {
 #ifdef ZHHAO_P2_BUFFERPOOL_DEBUG
   std::cout << "fetch write page: " << page_id << std::endl;
 #endif
-  auto fetch_page = FetchPage(page_id, AccessType::Scan);
-  // fetch_page->WLatch();
+  auto fetch_page = FetchPage(page_id);
+  fetch_page->WLatch();
   return {this, fetch_page};
 }
 
 auto BufferPoolManager::NewPageGuarded(page_id_t *page_id, AccessType access_type) -> BasicPageGuard {
-  auto fetch_page = NewPage(page_id, access_type);
+  auto fetch_page = NewPage(page_id);
 #ifdef ZHHAO_P2_BUFFERPOOL_DEBUG
   std::cout << "new basic page: " << *page_id << std::endl;
 #endif

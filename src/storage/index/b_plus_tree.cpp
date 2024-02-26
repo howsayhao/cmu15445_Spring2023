@@ -15,7 +15,7 @@
 // #define ZHHAO_P2_REMOVE_DEBUG
 // #define ZHHAO_P2_GET_DEBUG
 // #define ZHHAO_P2_GET0_DEBUG
-#define ZHHAO_P2_INSERT0_DEBUG
+// #define ZHHAO_P2_INSERT0_DEBUG
 // #define ZHHAO_P2_ITER_DEBUG
 
 #define POSITIVE_CRAB
@@ -311,10 +311,10 @@ auto BPLUSTREE_TYPE::Insert(const KeyType &key, const ValueType &value, Transact
   auto root_header_page = head_write_guard.template As<BPlusTreeHeaderPage>();
   if (root_header_page->root_page_id_ == INVALID_PAGE_ID) {
     page_id_t root_page_id;
-    // BasicPageGuard tmp_pin_guard = bpm_->NewPageGuarded(&root_page_id, AccessType::Scan);
-    // WritePageGuard root_guard = bpm_->FetchPageWrite(root_page_id);
-    // tmp_pin_guard.Drop();
-    BasicPageGuard root_guard = bpm_->NewPageGuarded(&root_page_id, AccessType::Scan);
+    BasicPageGuard tmp_pin_guard = bpm_->NewPageGuarded(&root_page_id);
+    WritePageGuard root_guard = bpm_->FetchPageWrite(root_page_id);
+    tmp_pin_guard.Drop();
+    // BasicPageGuard root_guard = bpm_->NewPageGuarded(&root_page_id, AccessType::Scan);
     auto root_header_page =
         head_write_guard.template AsMut<BPlusTreeHeaderPage>();  // 此处及之后都作此修改，以减少磁盘写脏页的不必要次数
     root_header_page->root_page_id_ = root_page_id;
@@ -331,7 +331,7 @@ auto BPLUSTREE_TYPE::Insert(const KeyType &key, const ValueType &value, Transact
       LOG_DEBUG("%s", log.str().c_str());
     }
 #endif
-    root_guard.WUnLock();
+    // root_guard.WUnLock();
     root_guard.Drop();
     return true;
   }
@@ -360,60 +360,6 @@ auto BPLUSTREE_TYPE::Insert(const KeyType &key, const ValueType &value, Transact
     if (curr_page->GetSize() < curr_page->GetMaxSize()) {  // 此时ctx.write_set_中必然至少有一个父亲结点
       ctx.write_set_.clear();
     }
-    // else if (!curr_page
-    //                 ->IsLeafPage()) {  //
-    //                 此处对内部结点进行负载均衡操作，因为测试倾斜向大的缘故，优先向左兄弟分担均衡
-    //   //
-    //   因为兄弟一般也都只有最多2个位子的空余，所以并不需要刻意比较哪个兄弟更富裕(代码复杂些)，一般而言左兄弟更富裕，因为右兄弟一般都是左兄弟分裂而来的
-    //   //
-    //   而且即便接下来马上要插入左兄弟了，最差的情况左兄弟也要分裂，那么也只是要封住那个瓶颈，当然多了以下管理负载均衡的开销
-    //   if (i != 1) {  // 有左兄弟
-    //     auto parent_page = ctx.write_set_.back().AsMut<InternalPage>();
-    //     WritePageGuard lsibling_guard =
-    //         bpm_->FetchPageWrite(parent_page->ValueAt(i - 2));  // 主要在于这个的开销其实比较大
-    //     auto lsibling_page = lsibling_guard.AsMut<InternalPage>();
-    //     if (lsibling_page->GetSize() < lsibling_page->GetMaxSize()) {  // 可向左兄弟进行负载均衡
-    //       int whole_size = lsibling_page->GetSize() + curr_page->GetSize();
-    //       int avg_size = whole_size / 2;  // 这个理论上会小一点，留给自己，否则有些情况等于白负载均衡了
-    //       int left_size = whole_size - avg_size;
-    //       int init_lsibling_size = lsibling_page->GetSize();
-    //       int init_rsibling_size = curr_page->GetSize();
-    //       int diff_size = init_rsibling_size - avg_size;
-    //       for (int j = init_lsibling_size; j < left_size; j++) {  // 对左兄弟进行负载分配
-    //         lsibling_page->IncreaseSize(1);
-    //         lsibling_page->SetValueAt(j, curr_page->ValueAt(j - init_lsibling_size));
-    //         if (j == init_lsibling_size) {  // 首个key结点应该借用父亲结点的相应值，而父亲结点的该值由之后右结点填充
-    //           lsibling_page->SetKeyAt(j, parent_page->KeyAt(i - 1));
-    //         } else {  // 也就是平行地移动，只不过key(0)没有意义所以第一次由父亲结点的key填充
-    //           lsibling_page->SetKeyAt(j, curr_page->KeyAt(j - init_lsibling_size));
-    //         }
-    //       }
-    //       parent_page->SetKeyAt(i - 1,
-    //                             curr_page->KeyAt(diff_size));  // 一定会有对左兄弟的分担，所以父结点一定需要填充恢复
-    //       int j = diff_size + 1;
-    //       for (; j < init_rsibling_size; j++) {
-    //         // 倾斜式地赋值，保留key(0)的信息
-    //         curr_page->SetKeyAt(j - diff_size, curr_page->KeyAt(j));
-    //         curr_page->SetValueAt(j - diff_size - 1, curr_page->ValueAt(j - 1));
-    //       }
-    //       // 最后一个结点需要将其下属的value也移过去
-    //       curr_page->SetValueAt(init_rsibling_size - diff_size - 1, curr_page->ValueAt(init_rsibling_size - 1));
-    //       curr_page->IncreaseSize(-diff_size);
-    //       if (comparator_(key, parent_page->KeyAt(i - 1)) < 0) {  // 如果分摊负载之后被索引到负担变重的左结点了
-    //         //
-    //         那反正不这样处理右结点也会被分裂，所以影响应该不太大，之后的skewed数据也是一样处理，只不过多了管理开销了
-    //         if (lsibling_page->GetSize() < lsibling_page->GetMaxSize()) {
-    //           ctx.write_set_.clear();
-    //         }
-    //         curr_page = lsibling_guard.template AsMut<InternalPage>();
-    //         ctx.write_set_.push_back(std::move(lsibling_guard));
-    //         continue;
-    //       }
-    //       // 否则的话因为右结点刚刚减轻负担过，所以不会分裂，那么可以释放父亲结点
-    //       ctx.write_set_.clear();
-    //     }
-    //   }
-    // }
     ctx.write_set_.push_back(std::move(guard));
   }
   auto leaf_guard =
@@ -482,10 +428,10 @@ auto BPLUSTREE_TYPE::Insert(const KeyType &key, const ValueType &value, Transact
   KeyType split_key;
   page_id_t split_page_id;
   // 先将叶子结点处理掉，将叶子结点分裂开，提供给上方pid,key1,key2三个东西
-  // BasicPageGuard tmp_pin_guard = bpm_->NewPageGuarded(&split_page_id, AccessType::Scan);
-  // auto split_guard = bpm_->FetchPageWrite(split_page_id);
-  // tmp_pin_guard.Drop();
-  BasicPageGuard split_guard = bpm_->NewPageGuarded(&split_page_id, AccessType::Scan);
+  BasicPageGuard tmp_pin_guard = bpm_->NewPageGuarded(&split_page_id);
+  auto split_guard = bpm_->FetchPageWrite(split_page_id);
+  tmp_pin_guard.Drop();
+  // BasicPageGuard split_guard = bpm_->NewPageGuarded(&split_page_id, AccessType::Scan);
   auto split_leaf_page = split_guard.template AsMut<LeafPage>();
   split_leaf_page->Init(leaf_max_size_);
   // split_leaf_page->SetMaxSize(leaf_max_size_);
@@ -517,7 +463,7 @@ auto BPLUSTREE_TYPE::Insert(const KeyType &key, const ValueType &value, Transact
   split_leaf_page->SetNextPageId(leaf_page->GetNextPageId());
   leaf_page->SetNextPageId(split_page_id);
   leaf_guard.Drop();
-  split_guard.WUnLock();
+  // split_guard.WUnLock();
   split_guard.Drop();
 
   // 不断迭代上推，直到只剩最后一个non-split parent，如果没有non-split parent那么全部推出
@@ -525,11 +471,11 @@ auto BPLUSTREE_TYPE::Insert(const KeyType &key, const ValueType &value, Transact
   page_id_t new_split_page_id;
   bool vice_terminal{true};
   while (ctx.write_set_.size() > 1) {
-    // BasicPageGuard tmp_pin_guard = bpm_->NewPageGuarded(&new_split_page_id, AccessType::Scan);
-    // WritePageGuard split_guard =
-    // bpm_->FetchPageWrite(new_split_page_id);  // 这两个guard设为局部变量，这样就可以自动drop了
-    // tmp_pin_guard.Drop();
-    BasicPageGuard split_guard = bpm_->NewPageGuarded(&new_split_page_id, AccessType::Scan);
+    BasicPageGuard tmp_pin_guard = bpm_->NewPageGuarded(&new_split_page_id);
+    WritePageGuard split_guard =
+        bpm_->FetchPageWrite(new_split_page_id);  // 这两个guard设为局部变量，这样就可以自动drop了
+    tmp_pin_guard.Drop();
+    // BasicPageGuard split_guard = bpm_->NewPageGuarded(&new_split_page_id, AccessType::Scan);
     WritePageGuard parent_guard = std::move(ctx.write_set_.back());
     ctx.write_set_.pop_back();
     orign_page_id = parent_guard.PageId();
@@ -592,7 +538,7 @@ auto BPLUSTREE_TYPE::Insert(const KeyType &key, const ValueType &value, Transact
     orign_key = parent_page->KeyAt(1);
     split_page_id = new_split_page_id;
     split_key = new_split_key;
-    split_guard.WUnLock();
+    // split_guard.WUnLock();
     parent_guard.Drop();
     split_guard.Drop();
   }
@@ -608,16 +554,14 @@ auto BPLUSTREE_TYPE::Insert(const KeyType &key, const ValueType &value, Transact
 #endif
     auto root_header_page = ctx.write_set_.front().template AsMut<BPlusTreeHeaderPage>();
     page_id_t root_page_id;
-    // BasicPageGuard tmp_pin_guard =
-    //     bpm_->NewPageGuarded(&root_page_id, AccessType::Scan);  //
+    BasicPageGuard tmp_pin_guard = bpm_->NewPageGuarded(&root_page_id);  //
     //     只是临时的guard，用完马上drop，免得影响后续的unpin以及evict
-    BasicPageGuard guard = bpm_->NewPageGuarded(&root_page_id, AccessType::Scan);
+    // BasicPageGuard guard = bpm_->NewPageGuarded(&root_page_id, AccessType::Scan);
     root_header_page->root_page_id_ = root_page_id;
-    // WritePageGuard guard =
-    // bpm_->FetchPageWrite(root_page_id);  // 这里的fetch必须在父节点drop之前，
+    WritePageGuard guard = bpm_->FetchPageWrite(root_page_id);  // 这里的fetch必须在父节点drop之前，
     // 因为否则的话该page id已经被获取了，但该guard还未初始化
     // 那么其他进程在悲观锁部分会先一步fetch，并对未初始化的guard进行操作
-    // tmp_pin_guard.Drop();  // 保护frame slot的任务已经完成了，需要把额外的那份pin给取消掉
+    tmp_pin_guard.Drop();  // 保护frame slot的任务已经完成了，需要把额外的那份pin给取消掉
     ctx.write_set_.front().Drop();
     auto root_page = guard.template AsMut<InternalPage>();
     root_page->Init(internal_max_size_);
@@ -639,7 +583,7 @@ auto BPLUSTREE_TYPE::Insert(const KeyType &key, const ValueType &value, Transact
       LOG_DEBUG("%s", log.str().c_str());
     }
 #endif
-    guard.WUnLock();
+    // guard.WUnLock();
     guard.Drop();
     return true;
   }
@@ -687,6 +631,7 @@ void BPLUSTREE_TYPE::Remove(const KeyType &key, Transaction *txn) {
   log << "---remove---" << key << " | thread " << std::this_thread::get_id() << std::endl;
   LOG_DEBUG("%s", log.str().c_str());
 #endif
+  // std::cout << "remove " << std::endl;
   Context ctx;
   ctx.write_set_.clear();
   WritePageGuard header_guard = bpm_->FetchPageWrite(header_page_id_);
@@ -1074,15 +1019,16 @@ void BPLUSTREE_TYPE::Remove(const KeyType &key, Transaction *txn) {
 INDEX_TEMPLATE_ARGUMENTS
 auto BPLUSTREE_TYPE::Begin() -> INDEXITERATOR_TYPE {
   // 找到最左边叶子结点的page_id
-  rwlatch_.RLock();
+  // rwlatch_.RLock();
 #ifdef ZHHAO_P2_ITER_DEBUG
   auto log = std::stringstream();
   log << "---begin()--- | thread " << std::this_thread::get_id() << std::endl;
   LOG_DEBUG("%s", log.str().c_str());
 #endif
+  // std::cout << "begin" << std::endl;
   if (IsEmpty()) {
     INDEXITERATOR_TYPE iterator(comparator_);
-    rwlatch_.RUnlock();
+    // rwlatch_.RUnlock();
     return iterator;
   }
   ReadPageGuard guard = bpm_->FetchPageRead(GetRootPageId());
@@ -1100,7 +1046,7 @@ auto BPLUSTREE_TYPE::Begin() -> INDEXITERATOR_TYPE {
   MappingType curr_map = {curr_key, curr_val};
   INDEXITERATOR_TYPE iterator("first_iterator", bpm_, comparator_, curr_page_id, curr_slot, curr_key, curr_val,
                               curr_map, leaf_max_size_, internal_max_size_);
-  rwlatch_.RUnlock();
+  // rwlatch_.RUnlock();
   return iterator;
 }
 
@@ -1111,7 +1057,7 @@ auto BPLUSTREE_TYPE::Begin() -> INDEXITERATOR_TYPE {
  */
 INDEX_TEMPLATE_ARGUMENTS
 auto BPLUSTREE_TYPE::Begin(const KeyType &key) -> INDEXITERATOR_TYPE {
-  rwlatch_.RLock();
+  // rwlatch_.RLock();
 #ifdef ZHHAO_P2_ITER_DEBUG
   auto log = std::stringstream();
   log << "---begin(" << key << ")---"
@@ -1124,7 +1070,7 @@ auto BPLUSTREE_TYPE::Begin(const KeyType &key) -> INDEXITERATOR_TYPE {
       break;
     }
   }
-  rwlatch_.RUnlock();
+  // rwlatch_.RUnlock();
   return iterator;
 }
 
@@ -1135,7 +1081,7 @@ auto BPLUSTREE_TYPE::Begin(const KeyType &key) -> INDEXITERATOR_TYPE {
  */
 INDEX_TEMPLATE_ARGUMENTS
 auto BPLUSTREE_TYPE::End() -> INDEXITERATOR_TYPE {
-  rwlatch_.RLock();
+  // rwlatch_.RLock();
 #ifdef ZHHAO_P2_ITER_DEBUG
   auto log = std::stringstream();
   log << "---end()--- | thread " << std::this_thread::get_id() << std::endl;
@@ -1143,7 +1089,7 @@ auto BPLUSTREE_TYPE::End() -> INDEXITERATOR_TYPE {
 #endif
   auto iterator = Begin();
   iterator.SetEnd();
-  rwlatch_.RUnlock();
+  // rwlatch_.RUnlock();
   return iterator;
 }
 

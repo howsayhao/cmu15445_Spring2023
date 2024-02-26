@@ -12,7 +12,6 @@
 
 #pragma once
 
-#include <cstddef>
 #include <limits>
 #include <list>
 #include <mutex>  // NOLINT
@@ -28,32 +27,13 @@ enum class AccessType { Unknown = 0, Get, Scan };
 
 class LRUKNode {
  public:
-  explicit LRUKNode(size_t lruk) : lruk_(lruk) {}
-
-  auto History() const -> std::list<size_t> { return history_; }
-  auto HistoryEntry() const -> size_t { return k_; }
-  auto EvictableTrue() const -> bool { return is_evictable_; }
-  /* 操作都不必加锁，因为说到底LRUKNode还是node_store_的成员，那里加锁就够了 */
-  void Access(size_t curr_stamp) {
-    history_.push_back(curr_stamp);
-    if (k_ == lruk_) {
-      history_.pop_front();
-    } else {
-      k_++;
-    }
-  }
-  void VerseEvictable() { is_evictable_ = !is_evictable_; }
-
- private:
   /** History of last seen K timestamps of this page. Least recent timestamp stored in front. */
   // Remove maybe_unused if you start using them. Feel free to change the member variables as you want.
 
   std::list<size_t> history_;
-  size_t k_{0};
-  [[maybe_unused]] frame_id_t fid_;
+  size_t k_;
+  frame_id_t fid_;
   bool is_evictable_{false};
-
-  size_t lruk_;
 };
 
 /**
@@ -64,7 +44,7 @@ class LRUKNode {
  * current timestamp and the timestamp of kth previous access.
  *
  * A frame with less than k historical references is given
- * +inf as its backward k-distance. When multiple frames have +inf backward k-distance,
+ * +inf as its backward k-distance. When multipe frames have +inf backward k-distance,
  * classical LRU algorithm is used to choose victim.
  */
 class LRUKReplacer {
@@ -103,7 +83,7 @@ class LRUKReplacer {
    * @param[out] frame_id id of frame that is evicted.
    * @return true if a frame is evicted successfully, false if no frames can be evicted.
    */
-  auto Evict(frame_id_t *frame_id) -> bool;  // 为什么还需要一个frame_id_t的参数呢 // 用来返回被踢出的frame_id的
+  auto Evict(frame_id_t *frame_id) -> bool;
 
   /**
    * TODO(P1): Add implementation
@@ -167,20 +147,13 @@ class LRUKReplacer {
    */
   auto Size() -> size_t;
 
-  /* DEBUG的时候用的，不用时注释掉 */
-  // auto NODES() const -> std::unordered_map<frame_id_t, LRUKNode> {return node_store_;}
-  // auto K() const -> size_t {return k_;}
-  auto MaxSize() -> size_t;
-  auto GetSize() -> size_t;
-  auto GetEvictableSize() -> size_t;
-
  private:
   // TODO(student): implement me! You can replace these member variables as you like.
   // Remove maybe_unused if you start using them.
   std::unordered_map<frame_id_t, LRUKNode> node_store_;
-  size_t current_timestamp_{0};  // 这个需要我每次操作时都自增1，来模拟时间戳的流动
-  size_t curr_size_{0};          // current frame now for evictable frame
-  size_t replacer_size_;         // number of maximum frame
+  size_t current_timestamp_{0};
+  size_t curr_size_{0};
+  size_t replacer_size_;
   size_t k_;
   std::mutex latch_;
 };

@@ -11,128 +11,110 @@
 //===----------------------------------------------------------------------===//
 
 #include "buffer/lru_k_replacer.h"
-#include <cstddef>
+#include <cstdint>
+#include <iostream>
 #include "common/exception.h"
-
-// #define ZHHAO_P2_DEBUG
 
 namespace bustub {
 
 LRUKReplacer::LRUKReplacer(size_t num_frames, size_t k) : replacer_size_(num_frames), k_(k) {}
 
 auto LRUKReplacer::Evict(frame_id_t *frame_id) -> bool {
-  bool inf = false;
-  bool evict_true = false;
-  size_t max_time_stamp = 0;
-  frame_id_t frame_to_evict{0};  // 没有意义的初始化0，所以需要evict_true辅助
-  this->latch_.lock();
-  for (auto const &it : this->node_store_) {  // it扫到后是pair类型
-    if (it.second.EvictableTrue()) {
-      evict_true = true;
-      auto diff_stamp = this->current_timestamp_ - it.second.History().front();
-      if (it.second.HistoryEntry() < this->k_) {  // Classical LRU
-        if (!(inf && max_time_stamp > diff_stamp)) {
-          inf = true;
-          max_time_stamp = diff_stamp;
-          frame_to_evict = it.first;
+  latch_.lock();
+  if (curr_size_ == 0) {
+    latch_.unlock();
+    return false;
+  }
+  size_t lruk_stamp = SIZE_MAX;
+  size_t timestamp = SIZE_MAX;
+  frame_id_t frame_to_evict = INT32_MIN;
+  for (auto &kv : node_store_) {
+    if (kv.second.is_evictable_) {
+      if (kv.second.history_.size() < k_) {
+        lruk_stamp = INT32_MIN;
+        if (kv.second.history_.back() < timestamp) {
+          timestamp = kv.second.history_.back();
+          frame_to_evict = kv.first;
         }
-      } else if (!inf) {  // LRU-K
-        if (max_time_stamp < diff_stamp) {
-          max_time_stamp = diff_stamp;
-          frame_to_evict = it.first;
+      } else {
+        if (kv.second.history_.back() < lruk_stamp) {
+          lruk_stamp = kv.second.history_.back();
+          frame_to_evict = kv.first;
         }
       }
     }
   }
-  if (!evict_true) {
-    this->latch_.unlock();
+
+  if (frame_to_evict == INT32_MIN) {
+    latch_.unlock();
     return false;
   }
+  node_store_.erase(frame_to_evict);
   *frame_id = frame_to_evict;
-  this->node_store_.erase(frame_to_evict);
-  this->curr_size_--;
-  this->latch_.unlock();
+  curr_size_--;
+  latch_.unlock();
   return true;
 }
 
 void LRUKReplacer::RecordAccess(frame_id_t frame_id, [[maybe_unused]] AccessType access_type) {
-  latch_.lock();
-  if (static_cast<size_t>(frame_id) >= this->replacer_size_ || frame_id < 0) {
-    latch_.unlock();
+  if (static_cast<size_t>(frame_id) >= replacer_size_ || frame_id < 0) {
     BUSTUB_ASSERT("id {} :out of replacer_size_ range", frame_id);
   }
-#ifdef ZHHAO_P2_DEBUG
-  std::cout << "frame get accessed: " << frame_id << "  | current_buffer_size: " << node_store_.size() << std::endl;
-#endif
+  latch_.lock();
+  current_timestamp_++;
   if (this->node_store_.find(frame_id) == this->node_store_.end()) {
-    this->node_store_.insert(std::make_pair(frame_id, LRUKNode(k_)));
+    node_store_[frame_id] = LRUKNode{{current_timestamp_}, k_, frame_id, false};
+  } else {
+    node_store_[frame_id].history_.push_front(current_timestamp_);
+    if (node_store_[frame_id].history_.size() > k_) {
+      node_store_[frame_id].history_.pop_back();
+    }
   }
-  this->node_store_.at(frame_id).Access(this->current_timestamp_);
-  this->current_timestamp_++;
   latch_.unlock();
 }
 
 void LRUKReplacer::SetEvictable(frame_id_t frame_id, bool set_evictable) {
-  latch_.lock();
-  if (static_cast<size_t>(frame_id) >= this->replacer_size_ || frame_id < 0) {
-    latch_.unlock();
+  if (static_cast<size_t>(frame_id) >= replacer_size_ || frame_id < 0) {
     BUSTUB_ASSERT("id {} :out of replacer_size_ range", frame_id);
   }
-  if (this->node_store_.find(frame_id) == this->node_store_.end()) {
+  latch_.lock();
+  if (node_store_.find(frame_id) != node_store_.end()) {
+    if (node_store_[frame_id].is_evictable_ && !set_evictable) {
+      node_store_[frame_id].is_evictable_ = false;
+      curr_size_--;
+    } else if (!node_store_[frame_id].is_evictable_ && set_evictable) {
+      node_store_[frame_id].is_evictable_ = true;
+      curr_size_++;
+    }
+  } else {
     latch_.unlock();
-    BUSTUB_ASSERT("id {} :no such frame yet", frame_id);
-  }
-  auto tmp = &this->node_store_.at(frame_id);
-  if (set_evictable && !tmp->EvictableTrue()) {
-    tmp->VerseEvictable();
-    this->curr_size_++;
-  } else if (!set_evictable && tmp->EvictableTrue()) {
-    tmp->VerseEvictable();
-    this->curr_size_--;
+    throw ExecutionException("frame is not in node_store_.");
   }
   latch_.unlock();
 }
 
 void LRUKReplacer::Remove(frame_id_t frame_id) {
   latch_.lock();
-  if (static_cast<size_t>(frame_id) >= this->replacer_size_ || frame_id < 0) {
+  if (static_cast<size_t>(frame_id) >= replacer_size_ || frame_id < 0) {
     latch_.unlock();
     BUSTUB_ASSERT("id {} :out of replacer_size_ range", frame_id);
   }
-  if (this->node_store_.find(frame_id) == this->node_store_.end()) {
+  if (node_store_.find(frame_id) == node_store_.end()) {
     latch_.unlock();
     return;
   }
-  if (!this->node_store_.at(frame_id).EvictableTrue()) {
+  if (!node_store_[frame_id].is_evictable_) {
     latch_.unlock();
-    BUSTUB_ASSERT("id {} :not evictable when trying to remove it", frame_id);
+    throw ExecutionException("frame is not evictable.");
   }
-  this->node_store_.erase(frame_id);
-  this->curr_size_--;
+  node_store_.erase(frame_id);
+  curr_size_--;
   latch_.unlock();
 }
 
-auto LRUKReplacer::GetEvictableSize() -> size_t {
-  latch_.lock();
-  auto current_evictable_size = this->curr_size_;
-  latch_.unlock();
-  return current_evictable_size;
+auto LRUKReplacer::Size() -> size_t {
+  std::scoped_lock scoped_latch(latch_);
+  return curr_size_;
 }
-
-auto LRUKReplacer::GetSize() -> size_t {
-  latch_.lock();
-  auto current_size = this->node_store_.size();
-  latch_.unlock();
-  return current_size;
-}
-
-auto LRUKReplacer::MaxSize() -> size_t {
-  latch_.lock();
-  auto max_size = replacer_size_;
-  latch_.unlock();
-  return max_size;
-}
-
-auto LRUKReplacer::Size() -> size_t { return GetEvictableSize(); }
 
 }  // namespace bustub

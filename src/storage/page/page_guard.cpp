@@ -10,7 +10,6 @@ BasicPageGuard::BasicPageGuard(BasicPageGuard &&that) noexcept {
   bpm_ = that.bpm_;
   page_ = that.page_;
   is_dirty_ = that.is_dirty_;
-  // guard_.already_unlock_ = false;
   // 将以前的page guard无效化
   that.page_ = nullptr;  // 使其basic page无效化
 }
