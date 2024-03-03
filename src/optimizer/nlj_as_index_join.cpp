@@ -33,12 +33,12 @@ auto Optimizer::MatchIndex(const std::string &table_name, uint32_t index_key_idx
 }
 
 auto Optimizer::OptimizeNLJAsIndexJoin(const AbstractPlanNodeRef &plan) -> AbstractPlanNodeRef {
+  // 递归->优化_nlj-to-indexjoin
   std::vector<AbstractPlanNodeRef> children;
   for (const auto &child : plan->GetChildren()) { // get children_plan_node_ref
     children.emplace_back(OptimizeNLJAsIndexJoin(child));
   }
-  // vector<plan_node_ref> -> ptr_to_'plan' with many children that in vector<plan_node_ref>
-  auto optimized_plan = plan->CloneWithChildren(std::move(children));
+  auto optimized_plan = plan->CloneWithChildren(std::move(children));  // now every child_node is index_join_node
 
   if (optimized_plan->GetType() == PlanType::NestedLoopJoin) {
     const auto &nlj_plan = dynamic_cast<const NestedLoopJoinPlanNode &>(*optimized_plan);
@@ -48,11 +48,11 @@ auto Optimizer::OptimizeNLJAsIndexJoin(const AbstractPlanNodeRef &plan) -> Abstr
     if (const auto *expr = dynamic_cast<const ComparisonExpression *>(nlj_plan.Predicate().get()); expr != nullptr) {
       if (expr->comp_type_ == ComparisonType::Equal) {
         if (const auto *left_expr = dynamic_cast<const ColumnValueExpression *>(expr->children_[0].get());
-            left_expr != nullptr) {  // 得到第一个表达式
+            left_expr != nullptr) { 
           if (const auto *right_expr = dynamic_cast<const ColumnValueExpression *>(expr->children_[1].get());
-              right_expr != nullptr) {  // 得到第二个表达式
+              right_expr != nullptr) { 
             // Ensure both exprs have tuple_id == 0, return left tuple rather than right one
-            auto left_expr_tuple_0 =  // GetColIdx是指比较的是tuple的第几位
+            auto left_expr_tuple_0 =  
                 std::make_shared<ColumnValueExpression>(0, left_expr->GetColIdx(), left_expr->GetReturnType());
             auto right_expr_tuple_0 =
                 std::make_shared<ColumnValueExpression>(0, right_expr->GetColIdx(), right_expr->GetReturnType());
