@@ -22,6 +22,10 @@ auto Optimizer::OptimizeNLJAsHashJoin(const AbstractPlanNodeRef &plan) -> Abstra
   // Note for 2023 Spring: You should at least support join keys of the form:
   // 1. <column expr> = <column expr>
   // 2. <column expr> = <column expr> AND <column expr> = <column expr>
+  BUSTUB_ENSURE(plan->GetType() == PlanType::NestedLoopJoin, "this function ONLY supports optimize nlj.");
+
+
+  
   return plan;
 }
 

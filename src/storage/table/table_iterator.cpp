@@ -21,7 +21,7 @@
 namespace bustub {
 
 TableIterator::TableIterator(TableHeap *table_heap, RID rid, RID stop_at_rid)
-    : table_heap_(table_heap), rid_(rid), stop_at_rid_(stop_at_rid) {
+    : table_heap_(table_heap), rid_(rid), stop_at_rid_() {
   // If the rid doesn't correspond to a tuple (i.e., the table has just been initialized), then
   // we set rid_ to invalid.
   auto page_guard = table_heap_->bpm_->FetchPageRead(rid_.GetPageId());

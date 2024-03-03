@@ -24,12 +24,13 @@ auto ProjectionExecutor::Next(Tuple *tuple, RID *rid) -> bool {
 
   // Compute expressions
   std::vector<Value> values{};
-  values.reserve(GetOutputSchema().GetColumnCount());
-  for (const auto &expr : plan_->GetExpressions()) {
-    values.push_back(expr->Evaluate(&child_tuple, child_executor_->GetOutputSchema()));
+  values.reserve(GetOutputSchema().GetColumnCount());  // plan.output_schema_.columns_.size()
+  for (const auto &expr : plan_->GetExpressions()) {   // plan.expressions_
+    values.push_back(expr->Evaluate(
+        &child_tuple, child_executor_->GetOutputSchema()));  // child_executor的输出模式 -> projection的输入模式
   }
 
-  *tuple = Tuple{values, &GetOutputSchema()};
+  *tuple = Tuple{values, &GetOutputSchema()};  // emit
 
   return true;
 }

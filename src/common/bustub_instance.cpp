@@ -227,7 +227,7 @@ auto BustubInstance::ExecuteSqlTxn(const std::string &sql, ResultWriter &writer,
 
   std::shared_lock<std::shared_mutex> l(catalog_lock_);
   bustub::Binder binder(*catalog_);
-  binder.ParseAndSave(sql);
+  binder.ParseAndSave(sql);  // postgres query -> SQL_statements(statement_nodes_)
   l.unlock();
 
   for (auto *stmt : binder.statement_nodes_) {

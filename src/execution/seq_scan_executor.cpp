@@ -11,13 +11,36 @@
 //===----------------------------------------------------------------------===//
 
 #include "execution/executors/seq_scan_executor.h"
+#include <memory>
+#include "catalog/schema.h"
 
 namespace bustub {
 
-SeqScanExecutor::SeqScanExecutor(ExecutorContext *exec_ctx, const SeqScanPlanNode *plan) : AbstractExecutor(exec_ctx) {}
+SeqScanExecutor::SeqScanExecutor(ExecutorContext *exec_ctx, const SeqScanPlanNode *plan)
+    : AbstractExecutor(exec_ctx),
+      plan_(plan),
+      tbl_info_(exec_ctx->GetCatalog()->GetTable(plan_->GetTableOid())),
+      tbl_it_(std::make_unique<TableIterator>(tbl_info_->table_->MakeIterator())) {}
 
-void SeqScanExecutor::Init() { throw NotImplementedException("SeqScanExecutor is not implemented"); }
+void SeqScanExecutor::Init() { tbl_it_ = std::make_unique<TableIterator>(tbl_info_->table_->MakeIterator()); }
+auto SeqScanExecutor::Next(Tuple *tuple, RID *rid) -> bool {
+  while (!tbl_it_->IsEnd()) {
+    *rid = tbl_it_->GetRID();
+    auto [meta, new_tuple] = tbl_it_->GetTuple();
+    ++(*tbl_it_);
+    if (!meta.is_deleted_) {
+      if (plan_->filter_predicate_) {  // 处理优化器将filter下推到seq_scan的情况
+        auto value = plan_->filter_predicate_->Evaluate(tuple, GetOutputSchema());
+        if (value.IsNull() || !value.GetAs<bool>()) {
+          return false;
+        }
+      }
+      *tuple = new_tuple;
+      return true;
+    }
+  }
 
-auto SeqScanExecutor::Next(Tuple *tuple, RID *rid) -> bool { return false; }
+  return false;
+}
 
 }  // namespace bustub

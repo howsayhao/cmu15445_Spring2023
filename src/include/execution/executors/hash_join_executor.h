@@ -12,13 +12,55 @@
 
 #pragma once
 
+#include <cstdint>
 #include <memory>
+#include <unordered_map>
 #include <utility>
+#include <vector>
 
+#include "catalog/schema.h"
+#include "common/util/hash_util.h"
 #include "execution/executor_context.h"
 #include "execution/executors/abstract_executor.h"
 #include "execution/plans/hash_join_plan.h"
 #include "storage/table/tuple.h"
+#include "type/value_factory.h"
+
+namespace bustub {
+
+struct JoinHashValue {
+  std::vector<Value> jh_values_;
+};
+struct JoinHashKey {
+  std::vector<Value> jh_keys_;
+  auto operator==(const JoinHashKey &other) const -> bool {
+    for (uint32_t i = 0; i < other.jh_keys_.size(); i++) {
+      if (jh_keys_[i].CompareEquals(other.jh_keys_[i]) != CmpBool::CmpTrue) {
+        return false;
+      }
+    }
+    return true;
+  }
+};
+
+}  // namespace bustub
+
+namespace std {
+
+template <>
+struct hash<bustub::JoinHashKey> {
+  auto operator()(const bustub::JoinHashKey &jh_key) const -> std::size_t {
+    size_t curr_hash = 0;
+    for (const auto &key : jh_key.jh_keys_) {
+      if (!key.IsNull()) {
+        curr_hash = bustub::HashUtil::CombineHashes(curr_hash, bustub::HashUtil::HashValue(&key));
+      }
+    }
+    return curr_hash;
+  }
+};
+
+}  // namespace std
 
 namespace bustub {
 
@@ -54,6 +96,17 @@ class HashJoinExecutor : public AbstractExecutor {
  private:
   /** The NestedLoopJoin plan node to be executed. */
   const HashJoinPlanNode *plan_;
+
+  std::unique_ptr<AbstractExecutor> left_child_executor_;
+
+  std::unique_ptr<AbstractExecutor> right_child_executor_;
+
+  std::unordered_multimap<JoinHashKey, JoinHashValue> jht_{};
+
+  // std::unordered_map<JoinHashKey, JoinHashValue>::const_iterator jht_it_;
+  std::vector<Tuple> tuples_;
+
+  std::vector<Tuple>::iterator it_;
 };
 
 }  // namespace bustub

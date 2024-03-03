@@ -33,6 +33,23 @@ class IndexIterator {
   explicit IndexIterator(const KeyComparator &comparator);
   ~IndexIterator();  // NOLINT
 
+  auto operator=(const INDEXITERATOR_TYPE &other) -> INDEXITERATOR_TYPE & {
+    if (this != &other) {
+      // 处理对象成员的赋值
+      iterator_name_ = other.iterator_name_;
+      // bpm_ = other.bpm_;
+      // comparator_ = other.comparator_;
+      curr_page_id_ = other.curr_page_id_;
+      curr_slot_ = other.curr_slot_;
+      curr_key_ = other.curr_key_;
+      curr_val_ = other.curr_val_;
+      curr_map_ = other.curr_map_;
+      leaf_max_size_ = other.leaf_max_size_;
+      internal_max_size_ = other.internal_max_size_;
+    }
+    return *this;
+  }  // 实现来自gpt，以满足index_scan_executor对迭代器重定义init的要求
+
   auto IsEnd() const -> bool;
   void SetEnd();
   // auto IsEmpty() -> bool;

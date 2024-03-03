@@ -26,6 +26,7 @@ INDEXITERATOR_TYPE::IndexIterator(std::string name, BufferPoolManager *buffer_po
       curr_map_(curr_map),
       leaf_max_size_(leaf_max_size),
       internal_max_size_(internal_max_size) {}
+
 INDEX_TEMPLATE_ARGUMENTS
 INDEXITERATOR_TYPE::IndexIterator(const KeyComparator &comparator) : comparator_(std::move(comparator)) {
   iterator_name_ = "touch the end";
