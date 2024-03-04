@@ -16,7 +16,7 @@ namespace bustub {
 IndexScanExecutor::IndexScanExecutor(ExecutorContext *exec_ctx, const IndexScanPlanNode *plan)
     : AbstractExecutor(exec_ctx),
       plan_(plan),
-      index_info_(exec_ctx->GetCatalog()->GetIndex(plan_->GetIndexOid())),
+      index_info_(exec_ctx->GetCatalog()->GetIndex(plan_->index_oid_)),
       // Get the index identifier by index OID.
       tbl_info_(exec_ctx->GetCatalog()->GetTable(index_info_->table_name_)),
       // GetTable(plan_->GetIndexOid()) can not work, tbl_info_ turns to be null or wrong.

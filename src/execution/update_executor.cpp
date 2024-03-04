@@ -26,7 +26,7 @@ UpdateExecutor::UpdateExecutor(ExecutorContext *exec_ctx, const UpdatePlanNode *
                                std::unique_ptr<AbstractExecutor> &&child_executor)
     : AbstractExecutor(exec_ctx),
       plan_(plan),
-      tbl_info_(exec_ctx->GetCatalog()->GetTable(plan_->GetTableOid())),
+      tbl_info_(exec_ctx->GetCatalog()->GetTable(plan_->table_oid_)),
       child_executor_(std::move(child_executor)),
       tbl_index_(exec_ctx->GetCatalog()->GetTableIndexes(tbl_info_->name_)) {
   // As of Fall 2022, you DON'T need to implement update executor to have perfect score in project 3 / project 4.

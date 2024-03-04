@@ -35,7 +35,7 @@ auto Optimizer::MatchIndex(const std::string &table_name, uint32_t index_key_idx
 auto Optimizer::OptimizeNLJAsIndexJoin(const AbstractPlanNodeRef &plan) -> AbstractPlanNodeRef {
   // 递归->优化_nlj-to-indexjoin
   std::vector<AbstractPlanNodeRef> children;
-  for (const auto &child : plan->GetChildren()) { // get children_plan_node_ref
+  for (const auto &child : plan->GetChildren()) {  // get children_plan_node_ref
     children.emplace_back(OptimizeNLJAsIndexJoin(child));
   }
   auto optimized_plan = plan->CloneWithChildren(std::move(children));  // now every child_node is index_join_node
@@ -48,11 +48,11 @@ auto Optimizer::OptimizeNLJAsIndexJoin(const AbstractPlanNodeRef &plan) -> Abstr
     if (const auto *expr = dynamic_cast<const ComparisonExpression *>(nlj_plan.Predicate().get()); expr != nullptr) {
       if (expr->comp_type_ == ComparisonType::Equal) {
         if (const auto *left_expr = dynamic_cast<const ColumnValueExpression *>(expr->children_[0].get());
-            left_expr != nullptr) { 
+            left_expr != nullptr) {
           if (const auto *right_expr = dynamic_cast<const ColumnValueExpression *>(expr->children_[1].get());
-              right_expr != nullptr) { 
+              right_expr != nullptr) {
             // Ensure both exprs have tuple_id == 0, return left tuple rather than right one
-            auto left_expr_tuple_0 =  
+            auto left_expr_tuple_0 =
                 std::make_shared<ColumnValueExpression>(0, left_expr->GetColIdx(), left_expr->GetReturnType());
             auto right_expr_tuple_0 =
                 std::make_shared<ColumnValueExpression>(0, right_expr->GetColIdx(), right_expr->GetReturnType());

@@ -30,7 +30,7 @@ InsertExecutor::InsertExecutor(ExecutorContext *exec_ctx, const InsertPlanNode *
     : AbstractExecutor(exec_ctx),
       plan_(plan),
       child_executor_(std::move(child_executor)),
-      tbl_info_(exec_ctx_->GetCatalog()->GetTable(plan_->GetTableOid())),
+      tbl_info_(exec_ctx_->GetCatalog()->GetTable(plan_->table_oid_)),
       tbl_index_(exec_ctx->GetCatalog()->GetTableIndexes(tbl_info_->name_)) {}
 
 void InsertExecutor::Init() {
