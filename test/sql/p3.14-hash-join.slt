@@ -532,7 +532,7 @@ select * from temp_1 t1 inner join temp_2 t2 on t1.colB = t2.colA and t2.colC = 
 
 
 query rowsort +ensure:hash_join
-select * from temp_1 t1 inner join temp_2 t2 on t1.colC = t2.colB and t2.colC = t1.colB ;
+select * from temp_1 t1 inner join temp_2 t2 on t1.colC = t2.colB and t2.colC = t1.colB;
 ----
 6 2 170 92798 12 170 2
 10 8 398 60977 18 398 8

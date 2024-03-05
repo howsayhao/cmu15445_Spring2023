@@ -29,10 +29,10 @@ auto SeqScanExecutor::Next(Tuple *tuple, RID *rid) -> bool {
     auto [meta, new_tuple] = tbl_it_->GetTuple();
     ++(*tbl_it_);
     if (!meta.is_deleted_) {
-      if (plan_->filter_predicate_) {  // 处理优化器将filter下推到seq_scan的情况
-        auto value = plan_->filter_predicate_->Evaluate(tuple, GetOutputSchema());
+      if (plan_->filter_predicate_ != nullptr) {  // 处理优化器将filter下推到seq_scan的情况
+        auto value = plan_->filter_predicate_->Evaluate(&new_tuple, GetOutputSchema());
         if (value.IsNull() || !value.GetAs<bool>()) {
-          return false;
+          continue;
         }
       }
       *tuple = new_tuple;
