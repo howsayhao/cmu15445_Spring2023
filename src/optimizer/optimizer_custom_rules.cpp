@@ -9,11 +9,11 @@ namespace bustub {
 
 auto Optimizer::OptimizeCustom(const AbstractPlanNodeRef &plan) -> AbstractPlanNodeRef {
   auto p = plan;
-  p = OptimizeMergeProjection(p);  // omit no-need projection
-  p = OptimizeMergeFilterNLJ(p);   // filter+nlj -> nlj' 
-  p = OptimizeNLJAsHashJoin(p);    // nlj -> hash_join
+  p = OptimizeMergeProjection(p);     // omit no-need projection
+  p = OptimizeMergeFilterNLJ(p);      // filter+nlj -> nlj'
+  p = OptimizeNLJAsHashJoin(p);       // nlj -> hash_join
   p = OptimizeOrderByAsIndexScan(p);  // order-by -> index_scan
-  p = OptimizeSortLimitAsTopN(p);  // sort+limit -> topn
+  p = OptimizeSortLimitAsTopN(p);     // sort+limit -> topn
   // no NILASINDEXSCAN
   p = OptimizeMergeFilterScan(p);  // filter+seq_scan -> seq_scan(filter)
   return p;

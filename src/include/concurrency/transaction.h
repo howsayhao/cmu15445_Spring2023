@@ -171,7 +171,7 @@ class Transaction {
         thread_id_(std::this_thread::get_id()),
         txn_id_(txn_id),
         prev_lsn_(INVALID_LSN),
-        s_table_lock_set_{new std::unordered_set<table_oid_t>},
+        s_table_lock_set_{new std::unordered_set<table_oid_t>},  // unordered_set:哈希表实现
         x_table_lock_set_{new std::unordered_set<table_oid_t>},
         is_table_lock_set_{new std::unordered_set<table_oid_t>},
         ix_table_lock_set_{new std::unordered_set<table_oid_t>},

@@ -101,7 +101,6 @@ class Optimizer {
    */
   auto EstimatedCardinality(const std::string &table_name) -> std::optional<size_t>;
 
-
   // leaderboard  //TODO
 
   /** Catalog will be used during the planning process. USERS SHOULD ENSURE IT OUTLIVES

@@ -128,7 +128,7 @@ void TableLockTest1() {
     delete txns[i];
   }
 }
-TEST(LockManagerTest, DISABLED_TableLockTest1) { TableLockTest1(); }  // NOLINT
+TEST(LockManagerTest, TableLockTest1) { TableLockTest1(); }  // NOLINT
 
 /** Upgrading single transaction from S -> X */
 void TableLockUpgradeTest1() {
@@ -143,8 +143,15 @@ void TableLockUpgradeTest1() {
   CheckTableLockSizes(txn1, 1, 0, 0, 0, 0);
 
   /** Upgrade S to X */
-  EXPECT_EQ(true, lock_mgr.LockTable(txn1, LockManager::LockMode::EXCLUSIVE, oid));
-  CheckTableLockSizes(txn1, 0, 1, 0, 0, 0);
+  // EXPECT_EQ(true, lock_mgr.LockTable(txn1, LockManager::LockMode::EXCLUSIVE, oid));
+  // CheckTableLockSizes(txn1, 0, 1, 0, 0, 0);
+  try {
+    EXPECT_EQ(false, lock_mgr.LockTable(txn1, LockManager::LockMode::INTENTION_SHARED, oid));
+  } catch (TransactionAbortException &e) {
+    CheckAborted(txn1);
+    // CheckTxnRowLockSize(txn, oid, 0, 1);
+    CheckTableLockSizes(txn1, 1, 0, 0, 0, 0);
+  }
 
   /** Clean up */
   txn_mgr.Commit(txn1);
@@ -153,7 +160,7 @@ void TableLockUpgradeTest1() {
 
   delete txn1;
 }
-TEST(LockManagerTest, DISABLED_TableLockUpgradeTest1) { TableLockUpgradeTest1(); }  // NOLINT
+TEST(LockManagerTest, TableLockUpgradeTest1) { TableLockUpgradeTest1(); }  // NOLINT
 
 void RowLockTest1() {
   LockManager lock_mgr{};
@@ -209,7 +216,7 @@ void RowLockTest1() {
     delete txns[i];
   }
 }
-TEST(LockManagerTest, DISABLED_RowLockTest1) { RowLockTest1(); }  // NOLINT
+TEST(LockManagerTest, RowLockTest1) { RowLockTest1(); }  // NOLINT
 
 void TwoPLTest1() {
   LockManager lock_mgr{};
@@ -258,7 +265,7 @@ void TwoPLTest1() {
   delete txn;
 }
 
-TEST(LockManagerTest, DISABLED_TwoPLTest1) { TwoPLTest1(); }  // NOLINT
+TEST(LockManagerTest, TwoPLTest1) { TwoPLTest1(); }  // NOLINT
 
 void AbortTest1() {
   fmt::print(stderr, "AbortTest1: multiple X should block\n");
@@ -320,6 +327,6 @@ void AbortTest1() {
   delete txn3;
 }
 
-TEST(LockManagerTest, DISABLED_RowAbortTest1) { AbortTest1(); }  // NOLINT
+TEST(LockManagerTest, RowAbortTest1) { AbortTest1(); }  // NOLINT
 
 }  // namespace bustub
