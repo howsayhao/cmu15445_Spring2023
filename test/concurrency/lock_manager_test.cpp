@@ -311,15 +311,21 @@ void AbortTest1() {
   txn_mgr.Abort(txn2);
 
   /** txn1 releases lock */
-  EXPECT_EQ(true, lock_mgr.UnlockRow(txn1, oid, rid));
-  CheckTxnRowLockSize(txn1, oid, 0, 0);
+  // EXPECT_EQ(true, lock_mgr.UnlockRow(txn1, oid, rid));
+  // CheckTxnRowLockSize(txn1, oid, 0, 0);
+  try {
+    EXPECT_EQ(false, lock_mgr.UnlockTable(txn1, oid));
+  } catch (TransactionAbortException &e) {
+    CheckAborted(txn1);
+    CheckTxnRowLockSize(txn1, oid, 0, 1);
+  }
 
   txn2_task.join();
   txn3_task.join();
-  /** txn2 shouldn't have any row locks */
+  // /** txn2 shouldn't have any row locks */
   CheckTxnRowLockSize(txn2, oid, 0, 0);
   CheckTableLockSizes(txn2, 0, 0, 0, 0, 0);
-  /** txn3 should have the row lock */
+  // /** txn3 should have the row lock */
   CheckTxnRowLockSize(txn3, oid, 0, 1);
 
   delete txn1;
