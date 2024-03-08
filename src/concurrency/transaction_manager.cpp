@@ -40,12 +40,13 @@ void TransactionManager::Abort(Transaction *txn) {
         meta.is_deleted_ = true;
         record.table_heap_->UpdateTupleMeta(meta, record.rid_);
       } break;
-      case WType::DELETE: { // 删除并没有真实删除，空洞保留，因而回退只需要更新meta即可
+      case WType::DELETE: {  // 删除并没有真实删除，空洞保留，因而回退只需要更新meta即可
         TupleMeta meta = record.table_heap_->GetTupleMeta(record.rid_);
         meta.is_deleted_ = false;
         record.table_heap_->UpdateTupleMeta(meta, record.rid_);
-      }
-      default: break;
+      } break;
+      default:
+        break;
     }
     txn->GetWriteSet()->pop_back();
   }
@@ -60,8 +61,9 @@ void TransactionManager::Abort(Transaction *txn) {
       } break;
       case WType::DELETE: {
         index->index_->InsertEntry(key, record.rid_, txn);
-      }
-      default: break;
+      } break;
+      default:
+        break;
     }
   }
 

@@ -46,7 +46,7 @@ auto DeleteExecutor::Next([[maybe_unused]] Tuple *tuple, RID *rid) -> bool {
       auto key = tuple->KeyFromTuple(tbl_info_->schema_, index->key_schema_, index->index_->GetKeyAttrs());
       index->index_->DeleteEntry(key, *rid, exec_ctx_->GetTransaction());
       exec_ctx_->GetTransaction()->AppendIndexWriteRecord(
-        IndexWriteRecord(*rid, tbl_info_->oid_, WType::DELETE, *tuple, index->index_oid_, exec_ctx_->GetCatalog()));
+          IndexWriteRecord(*rid, tbl_info_->oid_, WType::DELETE, *tuple, index->index_oid_, exec_ctx_->GetCatalog()));
     }
     ++delete_nums;
   }

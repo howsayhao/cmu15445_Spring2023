@@ -36,7 +36,8 @@ void Test1(IsolationLevel lvl) {
   // should scan changes of committed txn
   auto db = GetDbForVisibilityTest("Test1");
   auto txn1 = Begin(*db, lvl);
-  Delete(txn1, *db, 233);
+  Delete(txn1, *db, 232);
+  Scan(txn1, *db, {234});
   Commit(*db, txn1);
   auto txn2 = Begin(*db, lvl);
   Scan(txn2, *db, {234});
@@ -47,6 +48,8 @@ void Test1(IsolationLevel lvl) {
 TEST(VisibilityTest, TestA) {
   // only this one will be public :)
   Test1(IsolationLevel::READ_COMMITTED);
+  Test1(IsolationLevel::READ_UNCOMMITTED);
+  Test1(IsolationLevel::REPEATABLE_READ);
 }
 
 // NOLINTNEXTLINE

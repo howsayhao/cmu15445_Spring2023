@@ -48,8 +48,9 @@ auto InsertExecutor::Next(Tuple *tuple, RID *rid) -> bool {
   TupleMeta meta = {INVALID_TXN_ID, INVALID_TXN_ID, false};
   int32_t row_nums{0};
   while (child_executor_->Next(tuple, rid)) {
-    // try: insert (tuple from child) to table
-    auto new_tuple_rid = tbl_info_->table_->InsertTuple(meta, *tuple, exec_ctx_->GetLockManager(), exec_ctx_->GetTransaction(), tbl_info_->oid_);
+    // insert (tuple from child) to table
+    auto new_tuple_rid = tbl_info_->table_->InsertTuple(meta, *tuple, exec_ctx_->GetLockManager(),
+                                                        exec_ctx_->GetTransaction(), tbl_info_->oid_);
     if (!new_tuple_rid.has_value()) {
       continue;
     }
@@ -57,11 +58,12 @@ auto InsertExecutor::Next(Tuple *tuple, RID *rid) -> bool {
     auto tbl_write_record = TableWriteRecord(tbl_info_->oid_, *rid, tbl_info_->table_.get());
     tbl_write_record.wtype_ = WType::INSERT;
     exec_ctx_->GetTransaction()->AppendTableWriteRecord(tbl_write_record);
-    // try: insert (index of this tuple) to (b_plus_index_tree of table)
+    // insert (index of this tuple) to (b_plus_index_tree of table)
     for (auto &index : tbl_index_) {
       auto key = tuple->KeyFromTuple(tbl_info_->schema_, index->key_schema_, index->index_->GetKeyAttrs());
       index->index_->InsertEntry(key, new_tuple_rid.value(), exec_ctx_->GetTransaction());
-      exec_ctx_->GetTransaction()->AppendIndexWriteRecord(IndexWriteRecord(*rid, tbl_info_->oid_, WType::INSERT, *tuple, index->index_oid_, exec_ctx_->GetCatalog()));
+      exec_ctx_->GetTransaction()->AppendIndexWriteRecord(
+          IndexWriteRecord(*rid, tbl_info_->oid_, WType::INSERT, *tuple, index->index_oid_, exec_ctx_->GetCatalog()));
     }
     // iteration
     ++row_nums;

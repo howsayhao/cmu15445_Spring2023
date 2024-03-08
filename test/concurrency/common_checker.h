@@ -193,6 +193,8 @@ auto GetDbForVisibilityTest(const std::string &name) -> std::shared_ptr<BustubIn
   fmt::print(stderr, "prepare\n");
   instance->ExecuteSql("CREATE TABLE t1(v1 int, v2 int);", writer);
   instance->ExecuteSql("INSERT INTO t1 VALUES (233, 1), (233, 2), (233, 3), (234, 1), (234, 2), (234, 3)", writer);
+  instance->ExecuteSql("UPDATE t1 SET v1=232 WHERE v1=233", writer);
+  instance->ExecuteSql("SELECT * FROM t1", writer);
   return instance;
 }
 
