@@ -36,7 +36,16 @@ InsertExecutor::InsertExecutor(ExecutorContext *exec_ctx, const InsertPlanNode *
 void InsertExecutor::Init() {
   child_executor_->Init();
   LockManager::LockMode lock_mode = LockManager::LockMode::INTENTION_EXCLUSIVE;
-  exec_ctx_->GetLockManager()->LockTable(exec_ctx_->GetTransaction(), lock_mode, tbl_info_->oid_);
+  // exec_ctx_->GetLockManager()->LockTable(exec_ctx_->GetTransaction(), lock_mode, tbl_info_->oid_);
+  try {
+    // if (!exec_ctx_->GetLockManager()->LockTable(exec_ctx_->GetTransaction(), lock_mode, tbl_info_->oid_)) {
+    // throw ExecutionException("insert init");
+    // }
+    exec_ctx_->GetLockManager()->LockTable(exec_ctx_->GetTransaction(), lock_mode, tbl_info_->oid_);
+  } catch (TransactionAbortException &e) {
+    // std::cout << e.GetInfo() << "<<<<<<<<<<<<<<<<<<<<<<<Insert table IX<<<>>>>>>>>>>>>>>>>>>>>>>>>>" << std::endl;
+    throw ExecutionException(e.GetInfo());
+  }
   done_ = false;
 }
 

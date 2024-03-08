@@ -28,6 +28,7 @@ void TransactionManager::Commit(Transaction *txn) {
   ReleaseLocks(txn);
 
   txn->SetState(TransactionState::COMMITTED);
+  // std::cout << "<<<<<<<<<<<<<<commit    " << txn->GetTransactionId() << ">>>>>>>>>>>>>>>>>>" << std::endl;
 }
 
 void TransactionManager::Abort(Transaction *txn) {
@@ -70,6 +71,7 @@ void TransactionManager::Abort(Transaction *txn) {
   ReleaseLocks(txn);
 
   txn->SetState(TransactionState::ABORTED);
+  // std::cout << "<<<<<<<<<<<<<<abort     " << txn->GetTransactionId() << ">>>>>>>>>>>>>>>>>>" << std::endl;
 }
 
 void TransactionManager::BlockAllTransactions() { UNIMPLEMENTED("block is not supported now!"); }

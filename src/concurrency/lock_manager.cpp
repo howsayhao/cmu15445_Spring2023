@@ -73,8 +73,8 @@ auto LockManager::LockTable(Transaction *txn, LockMode lock_mode, const table_oi
       // 1. Check the precondition of upgrade
       LockMode old_lock_mode = lock_request->lock_mode_;
       if (!((old_lock_mode == LockMode::INTENTION_SHARED) ||
-            (old_lock_mode == LockMode::SHARED && lock_mode != LockMode::INTENTION_SHARED &&
-             lock_mode != LockMode::INTENTION_EXCLUSIVE) ||
+            (old_lock_mode == LockMode::SHARED &&
+             (lock_mode == LockMode::SHARED_INTENTION_EXCLUSIVE || lock_mode == LockMode::EXCLUSIVE)) ||
             (old_lock_mode == LockMode::INTENTION_EXCLUSIVE &&
              (lock_mode == LockMode::SHARED_INTENTION_EXCLUSIVE || lock_mode == LockMode::EXCLUSIVE)) ||
             (old_lock_mode == LockMode::SHARED_INTENTION_EXCLUSIVE && lock_mode == LockMode::EXCLUSIVE))) {
@@ -620,6 +620,8 @@ void LockManager::RunCycleDetection() {
       while (HasCycle(&abort_txn_id)) {
         waits_for_latch_.lock();
         auto txn = txn_manager_->GetTransaction(abort_txn_id);
+        // std::cout << "from cycle-detect, abort txn: " << abort_txn_id << std::endl;
+        // std::cout << "##############################" << std::endl;
         txn_manager_->Abort(txn);
         waits_for_.erase(abort_txn_id);
         for (auto [t1, _] : waits_for_) {
