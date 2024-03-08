@@ -325,6 +325,7 @@ class LockManager {
   auto GrantAllowed(Transaction *txn, const std::shared_ptr<LockRequestQueue> &lock_request_queue, LockMode lock_mode)
       -> bool;
   void ThrowAbort(Transaction *txn, AbortReason abort_reason);
+  auto RecursiveGo(std::vector<txn_id_t> visited, std::vector<txn_id_t> keys, txn_id_t *abort_txn_id) -> bool;
 
  private:
   /** Spring 2023 */

@@ -13,6 +13,8 @@
 #include "concurrency/lock_manager.h"
 #include <algorithm>
 #include <memory>
+#include <utility>
+#include <vector>
 
 #include "common/config.h"
 #include "concurrency/transaction.h"
@@ -438,6 +440,11 @@ auto LockManager::AreLocksCompatible(LockMode l1, LockMode l2) -> bool {
 
 auto LockManager::GrantAllowed(Transaction *txn, const std::shared_ptr<LockRequestQueue> &lock_request_queue,
                                LockMode lock_mode) -> bool {
+  // i'm not sure if it really need, since gradescope#1 not require, but do matter in some case
+  if (txn->GetState() == TransactionState::COMMITTED || txn->GetState() == TransactionState::ABORTED) {
+    return false;
+  }
+
   /** Consider Upgrading */
   for (auto const &grant_lock_request : lock_request_queue->request_queue_) {
     if (grant_lock_request->granted_) {
@@ -471,14 +478,76 @@ auto LockManager::GrantAllowed(Transaction *txn, const std::shared_ptr<LockReque
   return false;
 }
 
-void LockManager::AddEdge(txn_id_t t1, txn_id_t t2) {}
+void LockManager::AddEdge(txn_id_t t1, txn_id_t t2) {
+  // waits_for_latch_.lock();
+  /** add this new valid txn */
+  if (waits_for_.find(t1) == waits_for_.end()) {
+    waits_for_[t1] = std::vector<txn_id_t>();
+  }
+  /**  If the edge already exists, you don't have to do anything. */
+  if (std::find(waits_for_[t1].begin(), waits_for_[t1].end(), t2) == waits_for_[t1].end()) {
+    waits_for_[t1].push_back(t2);
+  }
+  // waits_for_latch_.unlock();
+}
 
-void LockManager::RemoveEdge(txn_id_t t1, txn_id_t t2) {}
+void LockManager::RemoveEdge(txn_id_t t1, txn_id_t t2) {
+  // waits_for_latch_.lock();
+  /** If no such edge exists, you don't have to do anything. */
+  if (waits_for_.find(t1) != waits_for_.end()) {
+    if (auto it = std::find(waits_for_.at(t1).begin(), waits_for_.at(t1).end(), t2); it != waits_for_.at(t1).end()) {
+      waits_for_.at(t1).erase(it);
+    }
+  }
+  // waits_for_latch_.unlock();
+}
 
-auto LockManager::HasCycle(txn_id_t *txn_id) -> bool { return false; }
+auto LockManager::HasCycle(txn_id_t *txn_id) -> bool {
+  waits_for_latch_.lock();
+  std::vector<txn_id_t> visited{};
+  std::vector<txn_id_t> keys{};
+  for (const auto &pair : waits_for_) {
+    if (!pair.second.empty()) {
+      keys.push_back(pair.first);
+    }
+  }
+  if (RecursiveGo(visited, keys, txn_id)) {
+    waits_for_latch_.unlock();
+    return true;
+  }
+  waits_for_latch_.unlock();
+  return false;
+}
+
+auto LockManager::RecursiveGo(std::vector<txn_id_t> visited, std::vector<txn_id_t> keys, txn_id_t *abort_txn_id)
+    -> bool {
+  std::sort(keys.begin(), keys.end());
+  for (const auto &key : keys) {
+    if (std::find(visited.begin(), visited.end(), key) != visited.end()) {
+      *abort_txn_id = key;
+      for (auto youngest : visited) {
+        *abort_txn_id = std::max(*abort_txn_id, youngest);
+      }
+      return true;
+    }
+    visited.push_back(key);
+    const auto &wait_keys = waits_for_[key];
+    if (RecursiveGo(visited, wait_keys, abort_txn_id)) {
+      return true;
+    }
+    visited.pop_back();
+  }
+  return false;
+}
 
 auto LockManager::GetEdgeList() -> std::vector<std::pair<txn_id_t, txn_id_t>> {
-  std::vector<std::pair<txn_id_t, txn_id_t>> edges(0);
+  std::vector<std::pair<txn_id_t, txn_id_t>> edges{};
+  for (const auto &pair : waits_for_) {
+    txn_id_t u = pair.first;
+    for (auto v : pair.second) {
+      edges.emplace_back(std::make_pair(u, v));
+    }
+  }
   return edges;
 }
 
@@ -486,6 +555,78 @@ void LockManager::RunCycleDetection() {
   while (enable_cycle_detection_) {
     std::this_thread::sleep_for(cycle_detection_interval);
     {  // TODO(students): detect deadlock
+      /** destroy graph, start rebuilding */
+      waits_for_latch_.lock();
+      waits_for_.clear();
+      waits_for_latch_.unlock();
+
+      /** collect ask_for_info from lock_manager, add edge to graph, both table & row
+       *  ungrant_one ask for grant_one, also abort_one may not erase request yet */
+      table_lock_map_latch_.lock();
+      for (const auto &table : table_lock_map_) {
+        auto lock_request_queue = table.second;
+        std::vector<txn_id_t> u{};
+        std::vector<txn_id_t> v{};
+        lock_request_queue->latch_.lock();
+        for (const auto &request : lock_request_queue->request_queue_) {
+          auto txn = txn_manager_->GetTransaction(request->txn_id_);
+          if (txn->GetState() != TransactionState::ABORTED) {
+            // ONLY abort_one may exist while not allowed in graph
+            if (!request->granted_) {
+              u.push_back(request->txn_id_);
+            } else {
+              v.push_back(request->txn_id_);
+            }
+          }
+        }
+        lock_request_queue->latch_.unlock();
+        for (auto head : u) {
+          for (auto tail : v) {
+            waits_for_latch_.lock();
+            AddEdge(head, tail);
+            waits_for_latch_.unlock();
+          }
+        }
+      }
+      table_lock_map_latch_.unlock();
+      row_lock_map_latch_.lock();
+      for (const auto &row : row_lock_map_) {
+        auto lock_request_queue = row.second;
+        std::vector<txn_id_t> u{};
+        std::vector<txn_id_t> v{};
+        lock_request_queue->latch_.lock();
+        for (const auto &request : lock_request_queue->request_queue_) {
+          auto txn = txn_manager_->GetTransaction(request->txn_id_);
+          if (txn->GetState() != TransactionState::ABORTED) {
+            // ONLY abort_one may exist while not allowed in graph
+            if (!request->granted_) {
+              u.push_back(request->txn_id_);
+            } else {
+              v.push_back(request->txn_id_);
+            }
+          }
+        }
+        lock_request_queue->latch_.unlock();
+        for (auto head : u) {
+          for (auto tail : v) {
+            AddEdge(head, tail);
+          }
+        }
+      }
+      row_lock_map_latch_.unlock();
+
+      /** check hascycle whilely, update graph after deleting abort_txn, until no cycle  */
+      txn_id_t abort_txn_id{0};
+      while (HasCycle(&abort_txn_id)) {
+        waits_for_latch_.lock();
+        auto txn = txn_manager_->GetTransaction(abort_txn_id);
+        txn_manager_->Abort(txn);
+        waits_for_.erase(abort_txn_id);
+        for (auto [t1, _] : waits_for_) {
+          RemoveEdge(t1, abort_txn_id);
+        }
+        waits_for_latch_.unlock();
+      }
     }
   }
 }

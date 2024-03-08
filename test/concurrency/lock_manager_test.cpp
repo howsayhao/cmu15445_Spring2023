@@ -325,6 +325,7 @@ void AbortTest1() {
   // /** txn2 shouldn't have any row locks */
   CheckTxnRowLockSize(txn2, oid, 0, 0);
   CheckTableLockSizes(txn2, 0, 0, 0, 0, 0);
+  lock_mgr.UnlockTable(txn3, oid);
   // /** txn3 should have the row lock */
   CheckTxnRowLockSize(txn3, oid, 0, 1);
 

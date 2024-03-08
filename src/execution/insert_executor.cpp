@@ -35,6 +35,8 @@ InsertExecutor::InsertExecutor(ExecutorContext *exec_ctx, const InsertPlanNode *
 
 void InsertExecutor::Init() {
   child_executor_->Init();
+  LockManager::LockMode lock_mode = LockManager::LockMode::INTENTION_EXCLUSIVE;
+  exec_ctx_->GetLockManager()->LockTable(exec_ctx_->GetTransaction(), lock_mode, tbl_info_->oid_);
   done_ = false;
 }
 
@@ -47,15 +49,19 @@ auto InsertExecutor::Next(Tuple *tuple, RID *rid) -> bool {
   int32_t row_nums{0};
   while (child_executor_->Next(tuple, rid)) {
     // try: insert (tuple from child) to table
-    auto new_tuple_rid = tbl_info_->table_->InsertTuple(meta, *tuple);
+    auto new_tuple_rid = tbl_info_->table_->InsertTuple(meta, *tuple, exec_ctx_->GetLockManager(), exec_ctx_->GetTransaction(), tbl_info_->oid_);
     if (!new_tuple_rid.has_value()) {
       continue;
     }
     *rid = new_tuple_rid.value();
+    auto tbl_write_record = TableWriteRecord(tbl_info_->oid_, *rid, tbl_info_->table_.get());
+    tbl_write_record.wtype_ = WType::INSERT;
+    exec_ctx_->GetTransaction()->AppendTableWriteRecord(tbl_write_record);
     // try: insert (index of this tuple) to (b_plus_index_tree of table)
     for (auto &index : tbl_index_) {
       auto key = tuple->KeyFromTuple(tbl_info_->schema_, index->key_schema_, index->index_->GetKeyAttrs());
       index->index_->InsertEntry(key, new_tuple_rid.value(), exec_ctx_->GetTransaction());
+      exec_ctx_->GetTransaction()->AppendIndexWriteRecord(IndexWriteRecord(*rid, tbl_info_->oid_, WType::INSERT, *tuple, index->index_oid_, exec_ctx_->GetCatalog()));
     }
     // iteration
     ++row_nums;
