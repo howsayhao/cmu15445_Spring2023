@@ -102,6 +102,14 @@ class Optimizer {
   auto EstimatedCardinality(const std::string &table_name) -> std::optional<size_t>;
 
   // leaderboard  //TODO
+  auto RecursiveConvertAND(std::vector<AbstractExpressionRef> &expr_tuple_left,
+                           std::vector<AbstractExpressionRef> &expr_tuple_right, const AbstractExpressionRef &exprRef)
+      -> bool;
+  auto OptimizePredicatePushDown(const AbstractPlanNodeRef &plan) -> AbstractPlanNodeRef;
+  auto PushToItsChild(const AbstractPlanNodeRef &plan) -> AbstractPlanNodeRef;
+  auto CollectAllPredicates(std::vector<AbstractExpressionRef> &left_predicates,
+                            std::vector<AbstractExpressionRef> &right_predicates,
+                            std::vector<AbstractExpressionRef> &join_predicates, const AbstractExpressionRef &exprRef) -> bool;
 
   /** Catalog will be used during the planning process. USERS SHOULD ENSURE IT OUTLIVES
    * OPTIMIZER, otherwise it's a dangling reference.

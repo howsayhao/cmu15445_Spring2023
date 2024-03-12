@@ -6,6 +6,7 @@
 #include "common/macros.h"
 #include "execution/expressions/column_value_expression.h"
 #include "execution/expressions/constant_value_expression.h"
+#include "execution/expressions/logic_expression.h"
 #include "execution/plans/abstract_plan.h"
 #include "execution/plans/filter_plan.h"
 #include "execution/plans/nested_loop_join_plan.h"
@@ -60,15 +61,19 @@ auto Optimizer::OptimizeMergeFilterNLJ(const AbstractPlanNodeRef &plan) -> Abstr
       // Has exactly two children
       BUSTUB_ENSURE(child_plan->GetChildren().size() == 2, "NLJ should have exactly 2 children.");
 
-      if (IsPredicateTrue(nlj_plan.Predicate())) {
-        // Only rewrite when NLJ has always true predicate.
-        return std::make_shared<NestedLoopJoinPlanNode>(
-            filter_plan.output_schema_, nlj_plan.GetLeftPlan(), nlj_plan.GetRightPlan(),
-            RewriteExpressionForJoin(filter_plan.GetPredicate(),
-                                     nlj_plan.GetLeftPlan()->OutputSchema().GetColumnCount(),
-                                     nlj_plan.GetRightPlan()->OutputSchema().GetColumnCount()),
-            nlj_plan.GetJoinType());
-      }
+      // (hao) I think not matters
+      // if (IsPredicateTrue(nlj_plan.Predicate())) {
+      // // Only rewrite when NLJ has always true predicate.
+      return std::make_shared<NestedLoopJoinPlanNode>(
+          filter_plan.output_schema_, nlj_plan.GetLeftPlan(), nlj_plan.GetRightPlan(),
+          std::make_shared<LogicExpression>(
+              nlj_plan.Predicate(),
+              RewriteExpressionForJoin(filter_plan.GetPredicate(),
+                                       nlj_plan.GetLeftPlan()->OutputSchema().GetColumnCount(),
+                                       nlj_plan.GetRightPlan()->OutputSchema().GetColumnCount()),
+              LogicType::And),
+          nlj_plan.GetJoinType());
+      // }
     }
   }
   return optimized_plan;

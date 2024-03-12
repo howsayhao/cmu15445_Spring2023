@@ -21,9 +21,10 @@
 
 namespace bustub {
 
-auto RecursiveConvertAND(std::vector<AbstractExpressionRef> &expr_tuple_left,
-                         std::vector<AbstractExpressionRef> &expr_tuple_right, const AbstractExpressionRef &exprRef)
-    -> bool {
+auto Optimizer::RecursiveConvertAND(std::vector<AbstractExpressionRef> &expr_tuple_left,
+                                    std::vector<AbstractExpressionRef> &expr_tuple_right,
+                                    const AbstractExpressionRef &exprRef) -> bool {
+  // std::cout << "<<<<<<<>>>>>>>>" << exprRef->ToString() << std::endl;
   if (const auto *andexpr = dynamic_cast<const LogicExpression *>(exprRef.get());
       andexpr != nullptr && andexpr->logic_type_ == LogicType::And) {
     if (RecursiveConvertAND(expr_tuple_left, expr_tuple_right, andexpr->children_[0]) &&
@@ -32,7 +33,10 @@ auto RecursiveConvertAND(std::vector<AbstractExpressionRef> &expr_tuple_left,
     }
   } else {
     auto expr = dynamic_cast<const ComparisonExpression *>(exprRef.get());
-    if (expr == nullptr || expr->comp_type_ != ComparisonType::Equal) {
+    if (IsPredicateTrue(exprRef)) {
+      return true;
+    }
+    if ((expr == nullptr || expr->comp_type_ != ComparisonType::Equal)) {
       return false;
     }
     if (const auto *left_expr = dynamic_cast<const ColumnValueExpression *>(expr->children_[0].get());

@@ -1,5 +1,5 @@
 statement ok
-explain (o) select count(*), max(__mock_t4_1m.x), max(__mock_t4_1m.y), max(__mock_t5_1m.x), max(__mock_t5_1m.y), max(__mock_t6_1m.x), max(__mock_t6_1m.y)
+explain  select count(*), max(__mock_t4_1m.x), max(__mock_t4_1m.y), max(__mock_t5_1m.x), max(__mock_t5_1m.y), max(__mock_t6_1m.x), max(__mock_t6_1m.y)
     from __mock_t4_1m, __mock_t5_1m, __mock_t6_1m
         where (__mock_t4_1m.x = __mock_t5_1m.x)
             and (__mock_t6_1m.y = __mock_t5_1m.y)
