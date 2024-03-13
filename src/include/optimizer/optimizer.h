@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <memory>
 #include <string>
 #include <tuple>
@@ -11,8 +12,42 @@
 #include "concurrency/transaction.h"
 #include "execution/expressions/abstract_expression.h"
 #include "execution/plans/abstract_plan.h"
+#include "execution/plans/aggregation_plan.h"
 
 namespace bustub {
+
+struct ColumnKey {
+  /** The group-by values */
+  AggregationType agg_type_{};
+  uint32_t col_idx_{};  // origin col_idx
+  ColumnKey(AggregationType type, uint32_t idx) : agg_type_(type), col_idx_(idx) {}
+  auto operator==(const ColumnKey &other) const -> bool {
+    if (agg_type_ == other.agg_type_) {
+      if (col_idx_ == other.col_idx_) {
+        return true;
+      }
+    }
+    return false;
+  }
+};
+
+struct ColumnValue {
+  std::vector<uint32_t> col_idx_{};
+  uint32_t min_col_idx_{0};
+
+  ColumnValue() = default;
+  explicit ColumnValue(uint32_t idx) {
+    col_idx_.push_back(idx);
+    min_col_idx_ = idx;
+  }
+  auto GetMinColIdx() -> uint32_t {
+    if (col_idx_.empty()) {
+      return -1;
+    }
+    return min_col_idx_;
+  }
+  auto IsMatch(uint32_t col) -> bool { return std::find(col_idx_.begin(), col_idx_.end(), col) != col_idx_.end(); }
+};
 
 /**
  * The optimizer takes an `AbstractPlanNode` and outputs an optimized `AbstractPlanNode`.
@@ -109,7 +144,25 @@ class Optimizer {
   auto PushToItsChild(const AbstractPlanNodeRef &plan) -> AbstractPlanNodeRef;
   auto CollectAllPredicates(std::vector<AbstractExpressionRef> &left_predicates,
                             std::vector<AbstractExpressionRef> &right_predicates,
-                            std::vector<AbstractExpressionRef> &join_predicates, const AbstractExpressionRef &exprRef) -> bool;
+                            std::vector<AbstractExpressionRef> &join_predicates, const AbstractExpressionRef &exprRef)
+      -> bool;
+  auto OptimizeConstantFolder(const AbstractPlanNodeRef &plan) -> AbstractPlanNodeRef;
+  auto FoldPredicate(std::vector<AbstractExpressionRef> &expr, const AbstractExpressionRef &exprRef) -> bool;
+  auto IsConstValue(Value &value, const AbstractExpressionRef &exprRef) -> bool;
+  auto IsPredicateFalse(const AbstractExpressionRef &expr) -> bool;
+  auto OptimizeNullFolder(const AbstractPlanNodeRef &plan) -> AbstractPlanNodeRef;
+  auto SideConcerned(bool &side_0, bool &side_1, const AbstractExpressionRef &exprRef) -> bool;
+  auto OptimizeEliminateAggregates(const AbstractPlanNodeRef &plan) -> AbstractPlanNodeRef;
+  auto MergeProjectionExpr(std::unordered_map<ColumnKey, ColumnValue> &ht, std::vector<AbstractExpressionRef> &expr,
+                           const std::vector<AbstractExpressionRef> &exprRef) -> bool;
+  auto OptimizeColumnCut(const AbstractPlanNodeRef &plan) -> AbstractPlanNodeRef;
+  auto NoteNecessary(bool necessary[], const AbstractExpressionRef &exprRef) -> bool;
+  auto ReorderChildSchema(const bool necessary[], uint32_t size, const AbstractPlanNodeRef &plan)
+      -> AbstractPlanNodeRef;
+  auto ReorderNodeExpr(const bool necessary[], uint32_t size, std::vector<AbstractExpressionRef> &expr,
+                       const std::vector<AbstractExpressionRef> &exprRef) -> bool;
+  auto RecursiveOrderNodeExpr(uint32_t off_set, uint32_t col, std::vector<AbstractExpressionRef> &plan) -> bool;
+  auto OptimizeFalseFilterAsNullValue(const AbstractPlanNodeRef &plan) -> AbstractPlanNodeRef;
 
   /** Catalog will be used during the planning process. USERS SHOULD ENSURE IT OUTLIVES
    * OPTIMIZER, otherwise it's a dangling reference.
@@ -120,3 +173,13 @@ class Optimizer {
 };
 
 }  // namespace bustub
+
+namespace std {
+template <>
+struct std::hash<bustub::ColumnKey> {
+  auto operator()(const bustub::ColumnKey &agg_key) const -> std::size_t {
+    return std::hash<bustub::AggregationType>()(agg_key.agg_type_) ^ std::hash<int>()(agg_key.col_idx_);
+  }
+};
+
+}  // namespace std

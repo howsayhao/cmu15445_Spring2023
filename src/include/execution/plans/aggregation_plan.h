@@ -12,6 +12,7 @@
 
 #pragma once
 
+#include <cstdint>
 #include <memory>
 #include <string>
 #include <utility>
@@ -118,6 +119,41 @@ struct AggregateValue {
   std::vector<Value> aggregates_;
 };
 
+// struct ColumnKey {
+//   /** The group-by values */
+//   AggregationType agg_type_{};
+//   uint32_t col_idx_{};  // origin col_idx
+//   ColumnKey(AggregationType type, uint32_t idx) : agg_type_(type), col_idx_(idx) {};
+//   auto operator==(const ColumnKey &other) const -> bool {
+//     if (agg_type_ == other.agg_type_) {
+//       if (col_idx_ == other.col_idx_) {
+//         return true;
+//       }
+//     }
+//     return false;
+//   }
+// };
+
+// struct ColumnValue {
+//   std::vector<uint32_t> col_idx_{};
+//   uint32_t min_col_idx_{0};
+
+//   ColumnValue() = default;
+//   explicit ColumnValue(uint32_t idx) {
+//     col_idx_.push_back(idx);
+//     min_col_idx_ = idx;
+//   }
+//   auto GetMinColIdx() -> uint32_t {
+//     if (col_idx_.empty()) {
+//       return -1;
+//     }
+//     return min_col_idx_;
+//   }
+//   auto IsMatch(uint32_t col) -> bool {
+//     return std::find(col_idx_.begin(), col_idx_.end(), col) != col_idx_.end();
+//   }
+// };
+
 }  // namespace bustub
 
 namespace std {
@@ -164,3 +200,13 @@ struct fmt::formatter<bustub::AggregationType> : formatter<std::string> {
     return formatter<std::string>::format(name, ctx);
   }
 };
+
+// namespace  std {
+// template <>
+// struct std::hash<bustub::ColumnKey> {
+//   auto operator()(const bustub::ColumnKey &agg_key) const -> std::size_t {
+//     return std::hash<bustub::AggregationType>()(agg_key.agg_type_) ^ std::hash<int>()(agg_key.col_idx_);
+//   }
+// };
+
+// }  // namespace std
