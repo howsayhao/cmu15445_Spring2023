@@ -14,10 +14,12 @@
 
 #include <string>
 #include <utility>
+#include <vector>
 
 #include "catalog/catalog.h"
 #include "execution/expressions/abstract_expression.h"
 #include "execution/plans/abstract_plan.h"
+#include "type/value.h"
 
 namespace bustub {
 /**
@@ -32,6 +34,11 @@ class IndexScanPlanNode : public AbstractPlanNode {
    */
   IndexScanPlanNode(SchemaRef output, index_oid_t index_oid)
       : AbstractPlanNode(std::move(output), {}), index_oid_(index_oid) {}
+  IndexScanPlanNode(SchemaRef output, index_oid_t index_oid, AbstractExpressionRef predicate, std::vector<Value> keys)
+      : AbstractPlanNode(std::move(output), {}),
+        index_oid_(index_oid),
+        predicate_(std::move(predicate)),
+        range_start_(std::move(keys)) {}
 
   auto GetType() const -> PlanType override { return PlanType::IndexScan; }
 
@@ -44,9 +51,14 @@ class IndexScanPlanNode : public AbstractPlanNode {
   index_oid_t index_oid_;
 
   // Add anything you want here for index lookup
+  AbstractExpressionRef predicate_{};
+  std::vector<Value> range_start_{};
 
  protected:
   auto PlanNodeToString() const -> std::string override {
+    if (predicate_) {
+      return fmt::format("IndexScan {{ index_oid={}, filter={} }}", index_oid_, predicate_);
+    }
     return fmt::format("IndexScan {{ index_oid={} }}", index_oid_);
   }
 };

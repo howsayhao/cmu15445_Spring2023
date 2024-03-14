@@ -63,23 +63,13 @@ auto SeqScanExecutor::Next(Tuple *tuple, RID *rid) -> bool {
     if (exec_ctx_->IsDelete()) {
       LockManager::LockMode lock_mode = LockManager::LockMode::EXCLUSIVE;
       try {
-        // if (!exec_ctx_->GetLockManager()->LockTable(exec_ctx_->GetTransaction(), lock_mode, tbl_info_->oid_)) {
-        // throw ExecutionException("seqscan next, is_delete, locktable");
-        // }
-        // if (!exec_ctx_->GetLockManager()->LockRow(exec_ctx_->GetTransaction(), lock_mode, tbl_info_->oid_, *rid)) {
-        // throw ExecutionException("seqscan next, is_delete, lockrow");
-        // }
         exec_ctx_->GetLockManager()->LockTable(exec_ctx_->GetTransaction(), LockManager::LockMode::INTENTION_EXCLUSIVE,
                                                tbl_info_->oid_);
         exec_ctx_->GetLockManager()->LockRow(exec_ctx_->GetTransaction(), lock_mode, tbl_info_->oid_, *rid);
       } catch (TransactionAbortException &e) {
         // std::cout << e.GetInfo() << "<<<<<<<<<<<<<<<<<<<IsDelete<<<<<<<>>>>>>>>>>>>>>>>>>>>>>>>>" << std::endl;
         throw ExecutionException(e.GetInfo());
-        // exec_ctx_->GetLockManager()->ThrowAbort(exec_ctx_->GetTransaction(),
-        // AbortReason::ATTEMPTED_INTENTION_LOCK_ON_ROW);
       }
-      // exec_ctx_->GetLockManager()->LockTable(exec_ctx_->GetTransaction(), lock_mode, tbl_info_->oid_);
-      // exec_ctx_->GetLockManager()->LockRow(exec_ctx_->GetTransaction(), lock_mode, tbl_info_->oid_, *rid);
     }
     /** Fetch the tuple. Check tuple meta, and if you have implemented filter pushdown to scan, check the predicate. */
     auto [meta, new_tuple] = tbl_it_->GetTuple();
@@ -89,14 +79,9 @@ auto SeqScanExecutor::Next(Tuple *tuple, RID *rid) -> bool {
         auto value = plan_->filter_predicate_->Evaluate(&new_tuple, GetOutputSchema());
         if (value.IsNull() || !value.GetAs<bool>()) {
           /** If the tuple should not be read by this transaction, force unlock the row. */
-          // exec_ctx_->GetLockManager()->UnlockRow(exec_ctx_->GetTransaction(), tbl_info_->oid_, *rid, true);
           try {
             exec_ctx_->GetLockManager()->UnlockRow(exec_ctx_->GetTransaction(), tbl_info_->oid_, *rid, true);
-            // if (!exec_ctx_->GetLockManager()->UnlockRow(exec_ctx_->GetTransaction(), tbl_info_->oid_, *rid, true)) {
-            //   throw ExecutionException("seq filter-not");
-            // }
           } catch (TransactionAbortException &e) {
-            // std::cout << e.GetInfo() << "<<<<<<<<<<<<<<<<<<<<not filter<<<<<<>>>>>>>>>>>>>>>>>>>>>>>>>" << std::endl;
             throw ExecutionException(e.GetInfo());
           }
           continue;

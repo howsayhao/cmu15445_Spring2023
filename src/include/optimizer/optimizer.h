@@ -163,7 +163,10 @@ class Optimizer {
                        const std::vector<AbstractExpressionRef> &exprRef) -> bool;
   auto RecursiveOrderNodeExpr(uint32_t off_set, uint32_t col, std::vector<AbstractExpressionRef> &plan) -> bool;
   auto OptimizeFalseFilterAsNullValue(const AbstractPlanNodeRef &plan) -> AbstractPlanNodeRef;
-
+  auto OptimizeIndexRange(const AbstractPlanNodeRef &plan) -> AbstractPlanNodeRef;
+  auto OptimizeSelectIndexScan(const AbstractPlanNodeRef &plan) -> AbstractPlanNodeRef;
+  auto MatchTwoKeysIndex(const std::string &table_name, const std::vector<uint32_t> &index_key_idxs)
+      -> std::optional<std::tuple<index_oid_t, std::string>>;
   /** Catalog will be used during the planning process. USERS SHOULD ENSURE IT OUTLIVES
    * OPTIMIZER, otherwise it's a dangling reference.
    */

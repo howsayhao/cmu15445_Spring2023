@@ -4,6 +4,7 @@
 #include <memory>
 #include <utility>
 #include <vector>
+#include "catalog/column.h"
 #include "common/macros.h"
 #include "execution/executors/index_scan_executor.h"
 #include "execution/executors/seq_scan_executor.h"
@@ -19,10 +20,12 @@
 #include "execution/plans/nested_index_join_plan.h"
 #include "execution/plans/nested_loop_join_plan.h"
 #include "execution/plans/projection_plan.h"
+#include "execution/plans/seq_scan_plan.h"
 #include "execution/plans/values_plan.h"
 #include "optimizer/optimizer.h"
 #include "type/numeric_type.h"
 #include "type/type.h"
+#include "type/value.h"
 #include "type/value_factory.h"
 
 // Note for 2023 Spring: You can add all optimizer rule implementations and apply the rules as you want in this file.
@@ -723,6 +726,67 @@ auto Optimizer::OptimizeFalseFilterAsNullValue(const AbstractPlanNodeRef &plan) 
   return optimized_plan;
 }
 
+auto Optimizer::OptimizeIndexRange(const AbstractPlanNodeRef &plan) -> AbstractPlanNodeRef {
+  std::vector<AbstractPlanNodeRef> children;
+  for (const auto &child : plan->GetChildren()) {
+    children.emplace_back(OptimizeIndexRange(child));
+  }
+  auto optimized_plan = plan->CloneWithChildren(std::move(children));
+
+  if (optimized_plan->GetType() == PlanType::SeqScan) {
+    const auto &seqscan_plan = dynamic_cast<const SeqScanPlanNode &>(*optimized_plan);
+    if (seqscan_plan.filter_predicate_ != nullptr) {
+      /** q1建立了一个2-column的索引
+          因而我目前只准备处理(y>=/=/> const, x>=/=/> const)的情况，尽量简化，快速通过 */
+      if (const auto *logical_expr = dynamic_cast<const LogicExpression *>(seqscan_plan.filter_predicate_.get());
+          logical_expr != nullptr && logical_expr->logic_type_ == LogicType::And) {
+        auto left_expr = logical_expr->children_[0];
+        auto right_expr = logical_expr->children_[1];
+        if (const auto *left_cmp_expr = dynamic_cast<const ComparisonExpression *>(left_expr.get());
+            left_cmp_expr != nullptr && (left_cmp_expr->comp_type_ == ComparisonType::Equal ||
+                                         left_cmp_expr->comp_type_ == ComparisonType::GreaterThan ||
+                                         left_cmp_expr->comp_type_ == ComparisonType::GreaterThanOrEqual)) {
+          if (const auto *right_cmp_expr = dynamic_cast<const ComparisonExpression *>(right_expr.get());
+              right_cmp_expr != nullptr && (right_cmp_expr->comp_type_ == ComparisonType::Equal ||
+                                            right_cmp_expr->comp_type_ == ComparisonType::GreaterThan ||
+                                            right_cmp_expr->comp_type_ == ComparisonType::GreaterThanOrEqual)) {
+            const auto *left_column = dynamic_cast<const ColumnValueExpression *>(left_cmp_expr->children_[0].get());
+            const auto *left_const = dynamic_cast<const ConstantValueExpression *>(left_cmp_expr->children_[1].get());
+            const auto *right_column = dynamic_cast<const ColumnValueExpression *>(right_cmp_expr->children_[0].get());
+            const auto *right_const = dynamic_cast<const ConstantValueExpression *>(right_cmp_expr->children_[1].get());
+            if (left_column != nullptr && left_const != nullptr && right_column != nullptr && right_const != nullptr) {
+              const auto *table_info = catalog_.GetTable(seqscan_plan.GetTableOid());
+              const auto indices = catalog_.GetTableIndexes(table_info->name_);
+              std::vector<uint32_t> column_ids;
+              column_ids.emplace_back(left_column->GetColIdx());
+              column_ids.emplace_back(right_column->GetColIdx());
+              for (const auto *index : indices) {
+                const auto &columns = index->key_schema_.GetColumns();
+                if (columns.size() == 2) {
+                  if (columns[0].GetName() == table_info->schema_.GetColumn(column_ids[0]).GetName() &&
+                      columns[1].GetName() == table_info->schema_.GetColumn(column_ids[1]).GetName()) {
+                    std::vector<Value> values{left_const->val_, right_const->val_};
+                    return std::make_shared<IndexScanPlanNode>(seqscan_plan.output_schema_, index->index_oid_,
+                                                               seqscan_plan.filter_predicate_, values);
+                  }
+                  if (columns[0].GetName() == table_info->schema_.GetColumn(column_ids[1]).GetName() &&
+                      columns[1].GetName() == table_info->schema_.GetColumn(column_ids[0]).GetName()) {
+                    std::vector<Value> values{right_const->val_, left_const->val_};
+                    return std::make_shared<IndexScanPlanNode>(seqscan_plan.output_schema_, index->index_oid_,
+                                                               seqscan_plan.filter_predicate_, values);
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  return optimized_plan;
+}
+
 auto Optimizer::OptimizeCustom(const AbstractPlanNodeRef &plan) -> AbstractPlanNodeRef {
   auto p = plan;
   p = OptimizeMergeProjection(p);         // omit no-need projection
@@ -739,6 +803,8 @@ auto Optimizer::OptimizeCustom(const AbstractPlanNodeRef &plan) -> AbstractPlanN
   p = OptimizeSortLimitAsTopN(p);         // sort+limit -> topn
   // no NILASINDEXSCAN
   p = OptimizeMergeFilterScan(p);  // filter+seq_scan -> seq_scan(filter) // hao
+  p = OptimizeIndexRange(p);       // 范围索引 seq_scan(filter) -> index_scan
+  // p = OptimizeSelectIndexScan(p);
   return p;
 }
 

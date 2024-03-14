@@ -134,6 +134,9 @@ class BPlusTree {
 
   auto GetSlotNum(const KeyType &key, const BPlusTreePage *bp_page, bool type) -> int;
 
+  auto BinaryFind(const LeafPage *leaf_page, const KeyType &key) -> int;
+  auto BinaryFind(const InternalPage *internal_page, const KeyType &key) -> int;
+
  private:
   /* Debug Routines for FREE!! */
   void ToGraph(page_id_t page_id, const BPlusTreePage *page, std::ofstream &out);

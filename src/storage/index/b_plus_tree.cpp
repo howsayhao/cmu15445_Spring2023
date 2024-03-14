@@ -7,6 +7,7 @@
 // #include "common/logger.h"
 #include "common/rid.h"
 #include "storage/index/b_plus_tree.h"
+#include "storage/index/index_iterator.h"
 #include "storage/page/b_plus_tree_header_page.h"
 #include "storage/page/b_plus_tree_page.h"
 #include "storage/page/page_guard.h"
@@ -1011,6 +1012,55 @@ void BPLUSTREE_TYPE::Remove(const KeyType &key, Transaction *txn) {
 /*****************************************************************************
  * INDEX ITERATOR
  *****************************************************************************/
+
+// 二分查找
+INDEX_TEMPLATE_ARGUMENTS
+auto BPLUSTREE_TYPE::BinaryFind(const LeafPage *leaf_page, const KeyType &key) -> int {
+  // std::cout << "binary" << leaf_page << std::endl;
+  int l = 0;
+  int r = leaf_page->GetSize() - 1;
+  while (l < r) {
+    int mid = (l + r + 1) >> 1;
+    if (comparator_(leaf_page->KeyAt(mid), key) != 1) {
+      l = mid;
+    } else {
+      r = mid - 1;
+    }
+  }
+
+  if (r >= 0 && comparator_(leaf_page->KeyAt(r), key) == 1) {
+    r = -1;
+  }
+
+  return r;
+}
+
+INDEX_TEMPLATE_ARGUMENTS
+auto BPLUSTREE_TYPE::BinaryFind(const InternalPage *internal_page, const KeyType &key) -> int {
+  // if (internal_page == nullptr) return -1;
+
+  // if (internal_page->GetSize() == 0) return 0;
+
+  int l = 1;
+  int r = internal_page->GetSize() - 1;
+  // std::cout << "Binary: "
+  //           << " key: " << key << " " << r << std::endl;
+  while (l < r) {
+    int mid = (l + r + 1) >> 1;
+    // std::cout << "mid: " << mid << std::endl;
+    if (comparator_(internal_page->KeyAt(mid), key) != 1) {
+      l = mid;
+    } else {
+      r = mid - 1;
+    }
+  }
+
+  if (r == -1 || comparator_(internal_page->KeyAt(r), key) == 1) {
+    r = 0;
+  }
+
+  return r;
+}
 /*
  * Input parameter is void, find the leftmost leaf page first, then construct
  * index iterator
@@ -1018,36 +1068,72 @@ void BPLUSTREE_TYPE::Remove(const KeyType &key, Transaction *txn) {
  */
 INDEX_TEMPLATE_ARGUMENTS
 auto BPLUSTREE_TYPE::Begin() -> INDEXITERATOR_TYPE {
-  // 找到最左边叶子结点的page_id
-  // rwlatch_.RLock();
-#ifdef ZHHAO_P2_ITER_DEBUG
-  auto log = std::stringstream();
-  log << "---begin()--- | thread " << std::this_thread::get_id() << std::endl;
-  LOG_DEBUG("%s", log.str().c_str());
-#endif
-  // std::cout << "begin" << std::endl;
-  if (IsEmpty()) {
-    INDEXITERATOR_TYPE iterator(comparator_);
-    // rwlatch_.RUnlock();
-    return iterator;
+  Context ctx;
+
+  auto header_page_guard = bpm_->FetchPageRead(header_page_id_);
+  auto header_page = header_page_guard.As<BPlusTreeHeaderPage>();
+
+  if (header_page->root_page_id_ == INVALID_PAGE_ID) {
+    header_page_guard.SetDirty(false);
+    header_page_guard.Drop();
+    return End();
   }
-  ReadPageGuard guard = bpm_->FetchPageRead(GetRootPageId());
-  auto curr_page = guard.As<InternalPage>();
-  while (!curr_page->IsLeafPage()) {
-    guard = bpm_->FetchPageRead(curr_page->ValueAt(0));
-    curr_page = guard.As<InternalPage>();
+
+  auto root_page_guard = bpm_->FetchPageRead(header_page->root_page_id_);
+  auto root_page = root_page_guard.As<BPlusTreePage>();
+
+  // crabbing
+  header_page_guard.SetDirty(false);
+  header_page_guard.Drop();
+
+  ctx.read_set_.emplace_back(std::move(root_page_guard));
+
+  page_id_t begin_leaf = -1;
+  if (root_page->IsLeafPage()) {
+    begin_leaf = header_page->root_page_id_;
+    ctx.read_set_.back().SetDirty(false);
+    ctx.read_set_.back().Drop();
+    ctx.read_set_.pop_back();
+  } else {
+    while (true) {
+      auto internal = reinterpret_cast<const InternalPage *>(root_page);
+      root_page_guard = bpm_->FetchPageRead(internal->ValueAt(0));
+      root_page = root_page_guard.As<BPlusTreePage>();
+
+      // crabbing
+      while (!ctx.read_set_.empty()) {
+        ctx.read_set_.back().SetDirty(false);
+        ctx.read_set_.back().Drop();
+        ctx.read_set_.pop_back();
+      }
+
+      if (root_page->IsLeafPage()) {
+        begin_leaf = root_page_guard.PageId();
+        root_page_guard.SetDirty(false);
+        root_page_guard.Drop();
+        while (!ctx.read_set_.empty()) {
+          ctx.read_set_.back().SetDirty(false);
+          ctx.read_set_.back().Drop();
+          ctx.read_set_.pop_back();
+        }
+        break;
+      }
+      ctx.read_set_.emplace_back(std::move(root_page_guard));
+    }
   }
-  auto leaf_page = guard.As<LeafPage>();
-  // 建立迭代器并返回
-  page_id_t curr_page_id = guard.PageId();
-  int curr_slot = 0;
-  KeyType curr_key = leaf_page->KeyAt(0);
-  ValueType curr_val = leaf_page->ValueAt(0);
-  MappingType curr_map = {curr_key, curr_val};
-  INDEXITERATOR_TYPE iterator("first_iterator", bpm_, comparator_, curr_page_id, curr_slot, curr_key, curr_val,
-                              curr_map, leaf_max_size_, internal_max_size_);
-  // rwlatch_.RUnlock();
-  return iterator;
+
+  auto guard = bpm_->FetchPageRead(begin_leaf);
+  auto leaf = guard.As<LeafPage>();
+  if (leaf->GetSize() == 0) {
+    guard.SetDirty(false);
+    guard.Drop();
+    return End();
+  }
+
+  guard.SetDirty(false);
+  guard.Drop();
+
+  return INDEXITERATOR_TYPE(bpm_, begin_leaf, 0);
 }
 
 /*
@@ -1057,21 +1143,85 @@ auto BPLUSTREE_TYPE::Begin() -> INDEXITERATOR_TYPE {
  */
 INDEX_TEMPLATE_ARGUMENTS
 auto BPLUSTREE_TYPE::Begin(const KeyType &key) -> INDEXITERATOR_TYPE {
-  // rwlatch_.RLock();
-#ifdef ZHHAO_P2_ITER_DEBUG
-  auto log = std::stringstream();
-  log << "---begin(" << key << ")---"
-      << " | thread " << std::this_thread::get_id() << std::endl;
-  LOG_DEBUG("%s", log.str().c_str());
-#endif
-  auto iterator = Begin();
-  for (; iterator != End(); ++iterator) {
-    if (comparator_((*iterator).first, key) == 0) {
-      break;
+  Context ctx;
+
+  auto header_page_guard = bpm_->FetchPageRead(header_page_id_);
+  auto header_page = header_page_guard.As<BPlusTreeHeaderPage>();
+
+  if (header_page->root_page_id_ == INVALID_PAGE_ID) {
+    header_page_guard.SetDirty(false);
+    header_page_guard.Drop();
+    return End();
+  }
+  auto root_page_guard = bpm_->FetchPageRead(header_page->root_page_id_);
+  auto root_page = root_page_guard.As<BPlusTreePage>();
+
+  // crabbing
+  header_page_guard.SetDirty(false);
+  header_page_guard.Drop();
+
+  ctx.read_set_.emplace_back(std::move(root_page_guard));
+
+  page_id_t begin_leaf = -1;
+  int index = -1;
+  if (root_page->IsLeafPage()) {
+    begin_leaf = ctx.read_set_.back().PageId();
+    auto leaf = reinterpret_cast<const LeafPage *>(root_page);
+    index = BinaryFind(leaf, key);
+
+    while (!ctx.read_set_.empty()) {
+      ctx.read_set_.back().SetDirty(false);
+      ctx.read_set_.back().Drop();
+      ctx.read_set_.pop_back();
+    }
+
+  } else {
+    while (true) {
+      auto internal = reinterpret_cast<const InternalPage *>(root_page);
+      int idx = BinaryFind(internal, key);
+      root_page_guard = bpm_->FetchPageRead(internal->ValueAt(idx));
+      root_page = root_page_guard.As<BPlusTreePage>();
+
+      // crabbing
+      while (!ctx.read_set_.empty()) {
+        ctx.read_set_.back().SetDirty(false);
+        ctx.read_set_.back().Drop();
+        ctx.read_set_.pop_back();
+      }
+
+      if (root_page->IsLeafPage()) {
+        begin_leaf = root_page_guard.PageId();
+        auto leaf = reinterpret_cast<const LeafPage *>(root_page);
+        index = BinaryFind(leaf, key);
+
+        root_page_guard.SetDirty(false);
+        root_page_guard.Drop();
+
+        while (!ctx.read_set_.empty()) {
+          ctx.read_set_.back().SetDirty(false);
+          ctx.read_set_.back().Drop();
+          ctx.read_set_.pop_back();
+        }
+
+        break;
+      }
+
+      ctx.read_set_.emplace_back(std::move(root_page_guard));
     }
   }
-  // rwlatch_.RUnlock();
-  return iterator;
+
+  auto guard = bpm_->FetchPageRead(begin_leaf);
+  auto leaf = guard.As<LeafPage>();
+  if (leaf->GetSize() == 0) {
+    guard.SetDirty(false);
+    guard.Drop();
+    return End();
+  }
+
+  guard.SetDirty(false);
+  guard.Drop();
+
+  return INDEXITERATOR_TYPE(bpm_, begin_leaf, index);
 }
 
 /*
@@ -1080,30 +1230,120 @@ auto BPLUSTREE_TYPE::Begin(const KeyType &key) -> INDEXITERATOR_TYPE {
  * @return : index iterator
  */
 INDEX_TEMPLATE_ARGUMENTS
-auto BPLUSTREE_TYPE::End() -> INDEXITERATOR_TYPE {
-  // rwlatch_.RLock();
-#ifdef ZHHAO_P2_ITER_DEBUG
-  auto log = std::stringstream();
-  log << "---end()--- | thread " << std::this_thread::get_id() << std::endl;
-  LOG_DEBUG("%s", log.str().c_str());
-#endif
-  auto iterator = Begin();
-  iterator.SetEnd();
-  // rwlatch_.RUnlock();
-  return iterator;
-}
+auto BPLUSTREE_TYPE::End() -> INDEXITERATOR_TYPE { return INDEXITERATOR_TYPE(bpm_, -1, -1); }
 
 /**
  * @return Page id of the root of this tree
  */
 INDEX_TEMPLATE_ARGUMENTS
 auto BPLUSTREE_TYPE::GetRootPageId() -> page_id_t {
-  ReadPageGuard guard = bpm_->FetchPageRead(header_page_id_);
-  auto root_header_page = guard.template As<BPlusTreeHeaderPage>();
-  page_id_t root_page_id = root_header_page->root_page_id_;
-  guard.Drop();
+  auto header_page_guard = bpm_->FetchPageRead(header_page_id_);
+  auto header_page = header_page_guard.As<BPlusTreeHeaderPage>();
+
+  page_id_t root_page_id = header_page->root_page_id_;
+
+  header_page_guard.SetDirty(false);
+  header_page_guard.Drop();
+
   return root_page_id;
 }
+
+// /*****************************************************************************
+//  * INDEX ITERATOR
+//  *****************************************************************************/
+// /*
+//  * Input parameter is void, find the leftmost leaf page first, then construct
+//  * index iterator
+//  * @return : index iterator
+//  */
+// INDEX_TEMPLATE_ARGUMENTS
+// auto BPLUSTREE_TYPE::Begin() -> INDEXITERATOR_TYPE {
+//   // 找到最左边叶子结点的page_id
+//   // rwlatch_.RLock();
+// #ifdef ZHHAO_P2_ITER_DEBUG
+//   auto log = std::stringstream();
+//   log << "---begin()--- | thread " << std::this_thread::get_id() << std::endl;
+//   LOG_DEBUG("%s", log.str().c_str());
+// #endif
+//   // std::cout << "begin" << std::endl;
+//   if (IsEmpty()) {
+//     INDEXITERATOR_TYPE iterator(comparator_);
+//     // rwlatch_.RUnlock();
+//     return iterator;
+//   }
+//   ReadPageGuard guard = bpm_->FetchPageRead(GetRootPageId());
+//   auto curr_page = guard.As<InternalPage>();
+//   while (!curr_page->IsLeafPage()) {
+//     guard = bpm_->FetchPageRead(curr_page->ValueAt(0));
+//     curr_page = guard.As<InternalPage>();
+//   }
+//   auto leaf_page = guard.As<LeafPage>();
+//   // 建立迭代器并返回
+//   page_id_t curr_page_id = guard.PageId();
+//   int curr_slot = 0;
+//   KeyType curr_key = leaf_page->KeyAt(0);
+//   ValueType curr_val = leaf_page->ValueAt(0);
+//   MappingType curr_map = {curr_key, curr_val};
+//   INDEXITERATOR_TYPE iterator("first_iterator", bpm_, comparator_, curr_page_id, curr_slot, curr_key, curr_val,
+//                               curr_map, leaf_max_size_, internal_max_size_);
+//   // rwlatch_.RUnlock();
+//   return iterator;
+// }
+
+// /*
+//  * Input parameter is low key, find the leaf page that contains the input key
+//  * first, then construct index iterator
+//  * @return : index iterator
+//  */
+// INDEX_TEMPLATE_ARGUMENTS
+// auto BPLUSTREE_TYPE::Begin(const KeyType &key) -> INDEXITERATOR_TYPE {
+//   // rwlatch_.RLock();
+// #ifdef ZHHAO_P2_ITER_DEBUG
+//   auto log = std::stringstream();
+//   log << "---begin(" << key << ")---"
+//       << " | thread " << std::this_thread::get_id() << std::endl;
+//   LOG_DEBUG("%s", log.str().c_str());
+// #endif
+//   auto iterator = Begin();
+//   for (; iterator != End(); ++iterator) {
+//     if (comparator_((*iterator).first, key) == 0) {
+//       break;
+//     }
+//   }
+//   // rwlatch_.RUnlock();
+//   return iterator;
+// }
+
+// /*
+//  * Input parameter is void, construct an index iterator representing the end
+//  * of the key/value pair in the leaf node
+//  * @return : index iterator
+//  */
+// INDEX_TEMPLATE_ARGUMENTS
+// auto BPLUSTREE_TYPE::End() -> INDEXITERATOR_TYPE {
+//   // rwlatch_.RLock();
+// #ifdef ZHHAO_P2_ITER_DEBUG
+//   auto log = std::stringstream();
+//   log << "---end()--- | thread " << std::this_thread::get_id() << std::endl;
+//   LOG_DEBUG("%s", log.str().c_str());
+// #endif
+//   auto iterator = Begin();
+//   iterator.SetEnd();
+//   // rwlatch_.RUnlock();
+//   return iterator;
+// }
+
+// /**
+//  * @return Page id of the root of this tree
+//  */
+// INDEX_TEMPLATE_ARGUMENTS
+// auto BPLUSTREE_TYPE::GetRootPageId() -> page_id_t {
+//   ReadPageGuard guard = bpm_->FetchPageRead(header_page_id_);
+//   auto root_header_page = guard.template As<BPlusTreeHeaderPage>();
+//   page_id_t root_page_id = root_header_page->root_page_id_;
+//   guard.Drop();
+//   return root_page_id;
+// }
 
 /*****************************************************************************
  * UTILITIES AND DEBUG

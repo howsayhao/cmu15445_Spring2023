@@ -86,6 +86,7 @@ class BasicPageGuard {
 
   /* 自定义，方便测试，不用时应注释掉 */
   auto GetPage() const -> Page * { return page_; }
+  void SetDirty(bool is_dirty) { is_dirty_ = is_dirty; }
 
  private:
   friend class ReadPageGuard;
@@ -151,6 +152,8 @@ class ReadPageGuard {
 
   auto GetData() -> const char * { return guard_.GetData(); }
 
+  void SetDirty(bool is_dirty) { guard_.SetDirty(is_dirty); }
+
   template <class T>
   auto As() -> const T * {
     return guard_.As<T>();
@@ -214,6 +217,8 @@ class WritePageGuard {
   auto PageId() -> page_id_t { return guard_.PageId(); }
 
   auto GetData() -> const char * { return guard_.GetData(); }
+
+  void SetDirty(bool is_dirty) { guard_.SetDirty(is_dirty); }
 
   template <class T>
   auto As() -> const T * {

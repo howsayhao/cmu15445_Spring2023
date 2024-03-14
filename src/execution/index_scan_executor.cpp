@@ -11,6 +11,8 @@
 //===----------------------------------------------------------------------===//
 #include "execution/executors/index_scan_executor.h"
 #include <vector>
+#include "include/type/value_factory.h"
+#include "type/value.h"
 
 namespace bustub {
 IndexScanExecutor::IndexScanExecutor(ExecutorContext *exec_ctx, const IndexScanPlanNode *plan)
@@ -26,6 +28,13 @@ IndexScanExecutor::IndexScanExecutor(ExecutorContext *exec_ctx, const IndexScanP
 
 void IndexScanExecutor::Init() {
   it_ = dynamic_cast<BPlusTreeIndexForTwoIntegerColumn *>(index_info_->index_.get())->GetBeginIterator();
+
+  if (plan_->predicate_ != nullptr) {
+    Tuple key = Tuple(plan_->range_start_, index_info_->index_->GetKeySchema());
+    IntegerKeyType index_key;
+    index_key.SetFromKey(key);
+    it_ = dynamic_cast<BPlusTreeIndexForTwoIntegerColumn *>(index_info_->index_.get())->GetBeginIterator(index_key);
+  }
 }
 
 auto IndexScanExecutor::Next(Tuple *tuple, RID *rid) -> bool {
@@ -35,6 +44,13 @@ auto IndexScanExecutor::Next(Tuple *tuple, RID *rid) -> bool {
     ++it_;
     if (!meta.is_deleted_) {
       *tuple = new_tuple;
+      if (plan_->predicate_ != nullptr) {
+        if (plan_->predicate_->Evaluate(tuple, GetOutputSchema()).CompareEquals(ValueFactory::GetBooleanValue(true)) ==
+            CmpBool::CmpTrue) {
+          return true;
+        }
+        continue;
+      }
       return true;
     }
   }
