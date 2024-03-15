@@ -20,6 +20,7 @@
 #include <thread>  // NOLINT
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
 
 #include "common/config.h"
 #include "common/logger.h"
@@ -67,6 +68,9 @@ class TableWriteRecord {
  public:
   // NOLINTNEXTLINE
   TableWriteRecord(table_oid_t tid, RID rid, TableHeap *table_heap) : tid_(tid), rid_(rid), table_heap_(table_heap) {}
+  // /** proj4; */
+  // TableWriteRecord(table_oid_t tid, RID rid, TableHeap *table_heap, Tuple old_tuple)
+  //     : tid_(tid), rid_(rid), table_heap_(table_heap), old_tuple_(std::move(old_tuple)) {}
 
   table_oid_t tid_;
   RID rid_;
@@ -75,6 +79,7 @@ class TableWriteRecord {
   // Recording write type might be useful if you want to implement in-place update for leaderboard
   // optimization. You don't need it for the basic implementation.
   WType wtype_;
+  // Tuple old_tuple_;
 };
 
 /**
