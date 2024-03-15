@@ -34,11 +34,20 @@ class IndexScanPlanNode : public AbstractPlanNode {
    */
   IndexScanPlanNode(SchemaRef output, index_oid_t index_oid)
       : AbstractPlanNode(std::move(output), {}), index_oid_(index_oid) {}
+  /** proj3 opt; */
   IndexScanPlanNode(SchemaRef output, index_oid_t index_oid, AbstractExpressionRef predicate, std::vector<Value> keys)
       : AbstractPlanNode(std::move(output), {}),
         index_oid_(index_oid),
         predicate_(std::move(predicate)),
         range_start_(std::move(keys)) {}
+  /** proj4 opt */
+  IndexScanPlanNode(SchemaRef output, index_oid_t index_oid, AbstractExpressionRef predicate, std::vector<Value> keys,
+                    bool single_strike)
+      : AbstractPlanNode(std::move(output), {}),
+        index_oid_(index_oid),
+        predicate_(std::move(predicate)),
+        range_start_(std::move(keys)),
+        single_strike_(single_strike) {}
 
   auto GetType() const -> PlanType override { return PlanType::IndexScan; }
 
@@ -53,6 +62,7 @@ class IndexScanPlanNode : public AbstractPlanNode {
   // Add anything you want here for index lookup
   AbstractExpressionRef predicate_{};
   std::vector<Value> range_start_{};
+  bool single_strike_{false};
 
  protected:
   auto PlanNodeToString() const -> std::string override {

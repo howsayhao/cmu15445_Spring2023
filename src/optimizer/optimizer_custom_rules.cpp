@@ -780,6 +780,29 @@ auto Optimizer::OptimizeIndexRange(const AbstractPlanNodeRef &plan) -> AbstractP
             }
           }
         }
+      } else if (const auto *equal_expr =
+                     dynamic_cast<const ComparisonExpression *>(seqscan_plan.filter_predicate_.get());
+                 equal_expr != nullptr && equal_expr->comp_type_ == ComparisonType::Equal) {
+        /** 为了做proj4的leader_board又来打补丁了
+            处理 select * from t where key_col=const 的情况, 简称 斩首行动:) */
+        if (const auto *col_expr = dynamic_cast<const ColumnValueExpression *>(equal_expr->children_[0].get());
+            col_expr != nullptr) {
+          if (const auto *const_expr = dynamic_cast<const ConstantValueExpression *>(equal_expr->children_[1].get());
+              const_expr != nullptr) {
+            const auto *table_info = catalog_.GetTable(seqscan_plan.GetTableOid());
+            const auto indices = catalog_.GetTableIndexes(table_info->name_);
+            for (const auto *index : indices) {
+              const auto &column = index->key_schema_.GetColumns();
+              if (column.size() == 1) {
+                if (column.back().GetName() == table_info->schema_.GetColumn(col_expr->GetColIdx()).GetName()) {
+                  std::vector<Value> values{const_expr->val_};
+                  return std::make_shared<IndexScanPlanNode>(seqscan_plan.output_schema_, index->index_oid_,
+                                                             seqscan_plan.filter_predicate_, values, true);
+                }
+              }
+            }
+          }
+        }
       }
     }
   }
@@ -803,8 +826,7 @@ auto Optimizer::OptimizeCustom(const AbstractPlanNodeRef &plan) -> AbstractPlanN
   p = OptimizeSortLimitAsTopN(p);         // sort+limit -> topn
   // no NILASINDEXSCAN
   p = OptimizeMergeFilterScan(p);  // filter+seq_scan -> seq_scan(filter) // hao
-  p = OptimizeIndexRange(p);       // 范围索引 seq_scan(filter) -> index_scan
-  // p = OptimizeSelectIndexScan(p);
+  p = OptimizeIndexRange(p);       // 范围索引 seq_scan(filter) -> index_scan  // hao
   return p;
 }
 
