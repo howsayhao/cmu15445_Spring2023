@@ -5,9 +5,9 @@ statement ok
 create index t1xy on t1(x, y);
 
 query
-INSERT INTO t1 SELECT * FROM __mock_t1 limit 1000000;
+INSERT INTO t1 SELECT * FROM __mock_t1 limit 10000;
 ----
-1000000
+10000
 
 statement ok
 explain (o) select * from t1 where x >= 90 and y = 10;

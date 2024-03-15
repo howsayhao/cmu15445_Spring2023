@@ -24,8 +24,6 @@ INDEXITERATOR_TYPE::IndexIterator(BufferPoolManager *buffer_pool_manager, page_i
     auto guard = bpm_->FetchPageRead(cur);
     auto leaf = guard.As<LeafPage>();
     item_ = {leaf->KeyAt(index), leaf->ValueAt(index)};
-    guard.SetDirty(false);
-    guard.Drop();
   }
 }
 
@@ -47,16 +45,12 @@ auto INDEXITERATOR_TYPE::operator++() -> INDEXITERATOR_TYPE & {
 
   if (index_ >= leaf->GetSize()) {
     auto next_id = leaf->GetNextPageId();
-    guard.SetDirty(false);
-    guard.Drop();
     if (next_id != -1) {
       index_ = 0;
       cur_ = next_id;
       guard = bpm_->FetchPageRead(cur_);
       leaf = guard.As<LeafPage>();
       item_ = {leaf->KeyAt(index_), leaf->ValueAt(index_)};
-      guard.SetDirty(false);
-      guard.Drop();
     } else {
       cur_ = -1;
       index_ = -1;
@@ -64,8 +58,6 @@ auto INDEXITERATOR_TYPE::operator++() -> INDEXITERATOR_TYPE & {
     }
   } else {
     item_ = {leaf->KeyAt(index_), leaf->ValueAt(index_)};
-    guard.SetDirty(false);
-    guard.Drop();
   }
   return *this;
 }

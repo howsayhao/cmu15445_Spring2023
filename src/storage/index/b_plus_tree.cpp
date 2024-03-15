@@ -5,10 +5,13 @@
 #include "common/config.h"
 #include "common/exception.h"
 // #include "common/logger.h"
+#include "common/macros.h"
 #include "common/rid.h"
 #include "storage/index/b_plus_tree.h"
 #include "storage/index/index_iterator.h"
 #include "storage/page/b_plus_tree_header_page.h"
+#include "storage/page/b_plus_tree_internal_page.h"
+#include "storage/page/b_plus_tree_leaf_page.h"
 #include "storage/page/b_plus_tree_page.h"
 #include "storage/page/page_guard.h"
 
@@ -130,8 +133,8 @@ auto BPLUSTREE_TYPE::GetValue(const KeyType &key, std::vector<ValueType> *result
 }
 
 INDEX_TEMPLATE_ARGUMENTS
-auto BPLUSTREE_TYPE::GetSlotNum(const KeyType &key, const BPlusTreePage *bp_page, bool leaftype) -> int {
-  if (!leaftype) {  // 叶子结点
+auto BPLUSTREE_TYPE::GetSlotNum(const KeyType &key, const BPlusTreePage *bp_page, bool internaltype) -> int {
+  if (!internaltype) {  // 叶子结点
     auto leaf_page = reinterpret_cast<const LeafPage *>(bp_page);
     int start = 0;
     int end = leaf_page->GetSize() - 1;
@@ -1012,11 +1015,9 @@ void BPLUSTREE_TYPE::Remove(const KeyType &key, Transaction *txn) {
 /*****************************************************************************
  * INDEX ITERATOR
  *****************************************************************************/
-
 // 二分查找
 INDEX_TEMPLATE_ARGUMENTS
 auto BPLUSTREE_TYPE::BinaryFind(const LeafPage *leaf_page, const KeyType &key) -> int {
-  // std::cout << "binary" << leaf_page << std::endl;
   int l = 0;
   int r = leaf_page->GetSize() - 1;
   while (l < r) {
@@ -1037,17 +1038,10 @@ auto BPLUSTREE_TYPE::BinaryFind(const LeafPage *leaf_page, const KeyType &key) -
 
 INDEX_TEMPLATE_ARGUMENTS
 auto BPLUSTREE_TYPE::BinaryFind(const InternalPage *internal_page, const KeyType &key) -> int {
-  // if (internal_page == nullptr) return -1;
-
-  // if (internal_page->GetSize() == 0) return 0;
-
   int l = 1;
   int r = internal_page->GetSize() - 1;
-  // std::cout << "Binary: "
-  //           << " key: " << key << " " << r << std::endl;
   while (l < r) {
     int mid = (l + r + 1) >> 1;
-    // std::cout << "mid: " << mid << std::endl;
     if (comparator_(internal_page->KeyAt(mid), key) != 1) {
       l = mid;
     } else {
@@ -1061,6 +1055,7 @@ auto BPLUSTREE_TYPE::BinaryFind(const InternalPage *internal_page, const KeyType
 
   return r;
 }
+
 /*
  * Input parameter is void, find the leftmost leaf page first, then construct
  * index iterator
@@ -1068,72 +1063,28 @@ auto BPLUSTREE_TYPE::BinaryFind(const InternalPage *internal_page, const KeyType
  */
 INDEX_TEMPLATE_ARGUMENTS
 auto BPLUSTREE_TYPE::Begin() -> INDEXITERATOR_TYPE {
-  Context ctx;
-
-  auto header_page_guard = bpm_->FetchPageRead(header_page_id_);
-  auto header_page = header_page_guard.As<BPlusTreeHeaderPage>();
-
-  if (header_page->root_page_id_ == INVALID_PAGE_ID) {
-    header_page_guard.SetDirty(false);
-    header_page_guard.Drop();
+  ReadPageGuard head_guard = bpm_->FetchPageRead(header_page_id_);
+  if (head_guard.template As<BPlusTreeHeaderPage>()->root_page_id_ == INVALID_PAGE_ID) {
     return End();
   }
+  ReadPageGuard guard = bpm_->FetchPageRead(head_guard.As<BPlusTreeHeaderPage>()->root_page_id_);
+  head_guard.Drop();
 
-  auto root_page_guard = bpm_->FetchPageRead(header_page->root_page_id_);
-  auto root_page = root_page_guard.As<BPlusTreePage>();
-
-  // crabbing
-  header_page_guard.SetDirty(false);
-  header_page_guard.Drop();
-
-  ctx.read_set_.emplace_back(std::move(root_page_guard));
-
-  page_id_t begin_leaf = -1;
-  if (root_page->IsLeafPage()) {
-    begin_leaf = header_page->root_page_id_;
-    ctx.read_set_.back().SetDirty(false);
-    ctx.read_set_.back().Drop();
-    ctx.read_set_.pop_back();
-  } else {
-    while (true) {
-      auto internal = reinterpret_cast<const InternalPage *>(root_page);
-      root_page_guard = bpm_->FetchPageRead(internal->ValueAt(0));
-      root_page = root_page_guard.As<BPlusTreePage>();
-
-      // crabbing
-      while (!ctx.read_set_.empty()) {
-        ctx.read_set_.back().SetDirty(false);
-        ctx.read_set_.back().Drop();
-        ctx.read_set_.pop_back();
-      }
-
-      if (root_page->IsLeafPage()) {
-        begin_leaf = root_page_guard.PageId();
-        root_page_guard.SetDirty(false);
-        root_page_guard.Drop();
-        while (!ctx.read_set_.empty()) {
-          ctx.read_set_.back().SetDirty(false);
-          ctx.read_set_.back().Drop();
-          ctx.read_set_.pop_back();
-        }
-        break;
-      }
-      ctx.read_set_.emplace_back(std::move(root_page_guard));
-    }
+  auto curr_page = guard.template As<BPlusTreePage>();
+  while (!curr_page->IsLeafPage()) {
+    int slot_num = 0;
+    guard = bpm_->FetchPageRead(reinterpret_cast<const InternalPage *>(curr_page)->ValueAt(slot_num));
+    curr_page = guard.template As<BPlusTreePage>();
   }
+  // auto *leaf_page = reinterpret_cast<const LeafPage *>(curr_page);
 
-  auto guard = bpm_->FetchPageRead(begin_leaf);
-  auto leaf = guard.As<LeafPage>();
-  if (leaf->GetSize() == 0) {
-    guard.SetDirty(false);
-    guard.Drop();
-    return End();
+  // 找到叶子结点后判断是否有对应Key;
+  int slot_num = 0;
+  if (slot_num != -1) {
+    // result->push_back(leaf_page->ValueAt(slot_num));
+    return INDEXITERATOR_TYPE(bpm_, guard.PageId(), 0);
   }
-
-  guard.SetDirty(false);
-  guard.Drop();
-
-  return INDEXITERATOR_TYPE(bpm_, begin_leaf, 0);
+  return End();
 }
 
 /*
@@ -1143,85 +1094,35 @@ auto BPLUSTREE_TYPE::Begin() -> INDEXITERATOR_TYPE {
  */
 INDEX_TEMPLATE_ARGUMENTS
 auto BPLUSTREE_TYPE::Begin(const KeyType &key) -> INDEXITERATOR_TYPE {
-  Context ctx;
+  ReadPageGuard head_guard = bpm_->FetchPageRead(header_page_id_);
 
-  auto header_page_guard = bpm_->FetchPageRead(header_page_id_);
-  auto header_page = header_page_guard.As<BPlusTreeHeaderPage>();
-
-  if (header_page->root_page_id_ == INVALID_PAGE_ID) {
-    header_page_guard.SetDirty(false);
-    header_page_guard.Drop();
+  if (head_guard.template As<BPlusTreeHeaderPage>()->root_page_id_ == INVALID_PAGE_ID) {
     return End();
   }
-  auto root_page_guard = bpm_->FetchPageRead(header_page->root_page_id_);
-  auto root_page = root_page_guard.As<BPlusTreePage>();
-
-  // crabbing
-  header_page_guard.SetDirty(false);
-  header_page_guard.Drop();
-
-  ctx.read_set_.emplace_back(std::move(root_page_guard));
-
-  page_id_t begin_leaf = -1;
-  int index = -1;
-  if (root_page->IsLeafPage()) {
-    begin_leaf = ctx.read_set_.back().PageId();
-    auto leaf = reinterpret_cast<const LeafPage *>(root_page);
-    index = BinaryFind(leaf, key);
-
-    while (!ctx.read_set_.empty()) {
-      ctx.read_set_.back().SetDirty(false);
-      ctx.read_set_.back().Drop();
-      ctx.read_set_.pop_back();
+  ReadPageGuard guard = bpm_->FetchPageRead(head_guard.As<BPlusTreeHeaderPage>()->root_page_id_);
+  head_guard.Drop();
+  auto curr_page = guard.template As<BPlusTreePage>();
+  while (!curr_page->IsLeafPage()) {
+    // int slot_num = GetSlotNum(key, curr_page, true);
+    auto internal = reinterpret_cast<const InternalPage *>(curr_page);
+    int slot_num = BinaryFind(internal, key);
+    if (slot_num == -1) {
+      BUSTUB_ENSURE(1 == 2, "iterator begin(key) not find leaf page");
+      return End();
     }
-
-  } else {
-    while (true) {
-      auto internal = reinterpret_cast<const InternalPage *>(root_page);
-      int idx = BinaryFind(internal, key);
-      root_page_guard = bpm_->FetchPageRead(internal->ValueAt(idx));
-      root_page = root_page_guard.As<BPlusTreePage>();
-
-      // crabbing
-      while (!ctx.read_set_.empty()) {
-        ctx.read_set_.back().SetDirty(false);
-        ctx.read_set_.back().Drop();
-        ctx.read_set_.pop_back();
-      }
-
-      if (root_page->IsLeafPage()) {
-        begin_leaf = root_page_guard.PageId();
-        auto leaf = reinterpret_cast<const LeafPage *>(root_page);
-        index = BinaryFind(leaf, key);
-
-        root_page_guard.SetDirty(false);
-        root_page_guard.Drop();
-
-        while (!ctx.read_set_.empty()) {
-          ctx.read_set_.back().SetDirty(false);
-          ctx.read_set_.back().Drop();
-          ctx.read_set_.pop_back();
-        }
-
-        break;
-      }
-
-      ctx.read_set_.emplace_back(std::move(root_page_guard));
-    }
+    guard = bpm_->FetchPageRead(reinterpret_cast<const InternalPage *>(curr_page)->ValueAt(slot_num));
+    curr_page = guard.template As<BPlusTreePage>();
   }
+  auto *leaf_page = reinterpret_cast<const LeafPage *>(curr_page);
 
-  auto guard = bpm_->FetchPageRead(begin_leaf);
-  auto leaf = guard.As<LeafPage>();
-  if (leaf->GetSize() == 0) {
-    guard.SetDirty(false);
-    guard.Drop();
-    return End();
+  // 找到叶子结点后判断是否有对应Key;
+  // int slot_num = GetSlotNum(key, leaf_page, false);
+  int slot_num = BinaryFind(leaf_page, key);
+  if (slot_num != -1) {
+    return INDEXITERATOR_TYPE(bpm_, guard.PageId(), slot_num);
   }
-
-  guard.SetDirty(false);
-  guard.Drop();
-
-  return INDEXITERATOR_TYPE(bpm_, begin_leaf, index);
+  BUSTUB_ENSURE(1 == 2, "iterator begin(key) not find key at leaf page");
+  return End();
 }
 
 /*
@@ -1237,14 +1138,10 @@ auto BPLUSTREE_TYPE::End() -> INDEXITERATOR_TYPE { return INDEXITERATOR_TYPE(bpm
  */
 INDEX_TEMPLATE_ARGUMENTS
 auto BPLUSTREE_TYPE::GetRootPageId() -> page_id_t {
-  auto header_page_guard = bpm_->FetchPageRead(header_page_id_);
-  auto header_page = header_page_guard.As<BPlusTreeHeaderPage>();
-
-  page_id_t root_page_id = header_page->root_page_id_;
-
-  header_page_guard.SetDirty(false);
-  header_page_guard.Drop();
-
+  ReadPageGuard guard = bpm_->FetchPageRead(header_page_id_);
+  auto root_header_page = guard.template As<BPlusTreeHeaderPage>();
+  page_id_t root_page_id = root_header_page->root_page_id_;
+  guard.Drop();
   return root_page_id;
 }
 

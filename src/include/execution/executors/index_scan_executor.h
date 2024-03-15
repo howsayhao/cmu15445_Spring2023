@@ -52,5 +52,7 @@ class IndexScanExecutor : public AbstractExecutor {
   TableInfo *tbl_info_;
 
   BPlusTreeIndexIteratorForTwoIntegerColumn it_;
+
+  // bool single_2column_{false};
 };
 }  // namespace bustub

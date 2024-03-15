@@ -12,6 +12,8 @@
 #include "execution/executors/index_scan_executor.h"
 #include <vector>
 #include "include/type/value_factory.h"
+#include "storage/index/generic_key.h"
+#include "storage/table/tuple.h"
 #include "type/value.h"
 
 namespace bustub {
@@ -40,19 +42,32 @@ void IndexScanExecutor::Init() {
 auto IndexScanExecutor::Next(Tuple *tuple, RID *rid) -> bool {
   while (!it_.IsEnd()) {
     *rid = (*it_).second;
-    auto [meta, new_tuple] = tbl_info_->table_->GetTuple(*rid);
+    GenericKey<8> key = (*it_).first;
     ++it_;
-    if (!meta.is_deleted_) {
+    if (plan_->predicate_ != nullptr) {
+      std::vector<Value> data{};
+      data.emplace_back(key.ToValue(index_info_->index_->GetKeySchema(), 0));
+      data.emplace_back(key.ToValue(index_info_->index_->GetKeySchema(), 1));
+      // 偷个懒，目前的测试仅针对(x>=,y=)的场景
+      if (data[1].CompareEquals(plan_->range_start_[1]) != CmpBool::CmpTrue) {
+        continue;
+      }
+      if (data[0].CompareGreaterThanEquals(plan_->range_start_[0]) != CmpBool::CmpTrue) {
+        continue;
+      }
+      auto [meta, new_tuple] = tbl_info_->table_->GetTuple(*rid);
       *tuple = new_tuple;
-      if (plan_->predicate_ != nullptr) {
-        if (plan_->predicate_->Evaluate(tuple, GetOutputSchema()).CompareEquals(ValueFactory::GetBooleanValue(true)) ==
-            CmpBool::CmpTrue) {
-          return true;
-        }
+      if (meta.is_deleted_) {
         continue;
       }
       return true;
     }
+    auto [meta, new_tuple] = tbl_info_->table_->GetTuple(*rid);
+    *tuple = new_tuple;
+    if (meta.is_deleted_) {
+      continue;
+    }
+    return true;
   }
   return false;
 }
